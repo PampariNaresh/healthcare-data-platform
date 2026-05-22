@@ -1,0 +1,210 @@
+
+networks:
+  ec22-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  airflow-logs:
+
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  networks:
+    - ec22-net
+  environment:
+    AIRFLOW__CORE__EXECUTOR: ${AIRFLOW__CORE__EXECUTOR}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    MYSQL_HOST: ${MYSQL_HOST}
+    MYSQL_PORT: ${MYSQL_PORT}
+    MYSQL_DATABASE: ${MYSQL_DATABASE}
+    MYSQL_USER: ${MYSQL_USER}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/plugins:/opt/airflow/plugins
+    - airflow-logs:/opt/airflow/logs
+    - ./spark/jobs:/opt/spark/jobs
+  depends_on:
+    postgres:
+      condition: service_healthy
+  user: "${AIRFLOW_UID}:0"
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: ec22-postgres
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - "${POSTGRES_HOST_PORT}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Airflow Init ──────────────────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: ec22-airflow-init
+    restart: "no"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username ${_AIRFLOW_WWW_USER_USERNAME} \
+          --password ${_AIRFLOW_WWW_USER_PASSWORD} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
+
+  # ── Airflow Webserver ─────────────────────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: ec22-airflow-webserver
+    ports:
+      - "${AIRFLOW_WEBSERVER_PORT}:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Airflow Scheduler ─────────────────────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: ec22-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $(hostname)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Spark Master ──────────────────────────────────────────────────────────────
+  spark-master:
+    build:
+      context: ./pyspark
+      dockerfile: Dockerfile
+    container_name: ec22-spark-master
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - "${SPARK_MASTER_WEBUI_PORT}:8080"
+      - "${SPARK_MASTER_PORT}:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Spark Worker ──────────────────────────────────────────────────────────────
+  spark-worker:
+    build:
+      context: ./pyspark
+      dockerfile: Dockerfile
+    container_name: ec22-spark-worker
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - "${SPARK_WORKER_WEBUI_PORT}:8081"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ── Dashboard API ─────────────────────────────────────────────────────────────
+  dashboard-api:
+    build:
+      context: ./dashboard/fastapi-backend
+      dockerfile: Dockerfile
+    container_name: ec22-dashboard-api
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - "${DASHBOARD_API_PORT:-8000}:8000"
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      AIRFLOW_API_URL: http://airflow-webserver:8080
+      AIRFLOW_USER: ${_AIRFLOW_WWW_USER_USERNAME}
+      AIRFLOW_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+
+  # ── Dashboard UI ──────────────────────────────────────────────────────────────
+  dashboard-ui:
+    build:
+      context: ./dashboard/react-frontend
+      dockerfile: Dockerfile
+    container_name: ec22-dashboard-ui
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - "${DASHBOARD_UI_PORT:-3000}:80"
+    depends_on:
+      - dashboard-api

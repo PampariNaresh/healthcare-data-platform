@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+airflow/dags/__pycache__/
+airflow/plugins/__pycache__/
+node_modules/
+dist/
+*.log
