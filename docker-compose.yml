@@ -1,0 +1,221 @@
+networks:
+  healthcare-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+
+services:
+
+  # ── Zookeeper ────────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    restart: unless-stopped
+    networks:
+      - healthcare-net
+    ports:
+      - "${ZOOKEEPER_PORT}:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "cub", "zk-ready", "localhost:${ZOOKEEPER_PORT}", "30"]
+      interval: 20s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+  # ── Kafka ────────────────────────────────────────────────────────────────────
+  kafka:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    ports:
+      - "${KAFKA_HOST_PORT}:9092"
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID}
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:${KAFKA_INTERNAL_PORT},PLAINTEXT_HOST://65.0.80.152:${KAFKA_HOST_PORT}
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "${KAFKA_AUTO_CREATE_TOPICS}"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  # ── Kafka UI ─────────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    ports:
+      - "${KAFKA_UI_PORT}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: healthcare-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:${KAFKA_INTERNAL_PORT}
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:${ZOOKEEPER_PORT}
+
+  # ── MySQL ────────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    networks:
+      - healthcare-net
+    ports:
+      - "${MYSQL_HOST_PORT}:${MYSQL_CONTAINER_PORT}"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ── Producer ─────────────────────────────────────────────────────────────────
+  producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    container_name: producer
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      SEND_INTERVAL: ${SEND_INTERVAL}
+      MAX_EVENTS: ${MAX_EVENTS}
+
+  # ── Flink JobManager ─────────────────────────────────────────────────────────
+  flink-jobmanager:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-jobmanager
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    ports:
+      - "${FLINK_UI_PORT}:8081"
+    command: jobmanager
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - MYSQL_URL=jdbc:mysql://mysql:${MYSQL_CONTAINER_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&sessionVariables=foreign_key_checks=0
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - FLINK_REST_URL=http://localhost:${FLINK_UI_PORT}
+      - MAX_RETRIES=${MAX_RETRIES}
+      - RETRY_DELAY=${RETRY_DELAY}
+      - POLL_INTERVAL=${POLL_INTERVAL}
+      - JOB_SCRIPTS=${JOB_SCRIPTS}
+      - FLINK_CHECKPOINT_INTERVAL=${FLINK_CHECKPOINT_INTERVAL}
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS}
+        parallelism.default: ${FLINK_PARALLELISM}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Flink Job Submitter ───────────────────────────────────────────────────────
+  flink-job-submitter:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-job-submitter
+    restart: "no"
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs
+    command: python /opt/flink/jobs/submit_job.py
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - MYSQL_URL=jdbc:mysql://mysql:${MYSQL_CONTAINER_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&sessionVariables=foreign_key_checks=0
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - FLINK_REST_URL=http://flink-jobmanager:${FLINK_UI_PORT}
+      - MAX_RETRIES=${MAX_RETRIES}
+      - RETRY_DELAY=${RETRY_DELAY}
+      - POLL_INTERVAL=${POLL_INTERVAL}
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+        rest.port: ${FLINK_UI_PORT}
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS}
+        parallelism.default: ${FLINK_PARALLELISM}
+
+  # ── Flink TaskManager ────────────────────────────────────────────────────────
+  flink-taskmanager:
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
+    container_name: flink-taskmanager
+    restart: unless-stopped
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    networks:
+      - healthcare-net
+    command: taskmanager
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS}
+        parallelism.default: ${FLINK_PARALLELISM}
