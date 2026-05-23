@@ -7,6 +7,7 @@ import Pipeline from './pages/Pipeline'
 import DataEntry from './pages/DataEntry'
 import Infrastructure from './pages/Infrastructure'
 import Chat from './pages/Chat'
+import Monitoring from './pages/Monitoring'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/financial"     element={<Financial />} />
         <Route path="/operational"   element={<Operational />} />
         <Route path="/patients"      element={<Patients />} />
+        <Route path="/monitoring"    element={<Monitoring />} />
         <Route path="/pipeline"      element={<Pipeline />} />
         <Route path="/data-entry"    element={<DataEntry />} />
         <Route path="/infrastructure" element={<Infrastructure />} />

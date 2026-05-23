@@ -9,7 +9,8 @@ Flow:
                   └─► wait_for_spark_cluster
                             ├─► financial_analytics    (7 tables — parallel)
                             ├─► operational_analytics  (4 tables — parallel)
-                            └─► patient_analytics      (4 tables — parallel)
+                            ├─► patient_analytics      (4 tables — parallel)
+                            └─► monitoring_analytics   (5 tables — parallel)
                                         └─► pipeline_complete
 
 Schedule: daily at 02:00 UTC (after EC21 streaming pipeline has populated MySQL)
@@ -138,7 +139,7 @@ with DAG(
         python_callable=check_mysql_connection,
     )
 
-    # ── 2. Ensure all 15 analytical tables exist with proper schema ───────────
+    # ── 2. Ensure all 20 analytical tables exist with proper schema ───────────
     init_schema = PythonOperator(
         task_id="init_analytical_schema",
         python_callable=init_analytical_schema,
@@ -193,6 +194,19 @@ with DAG(
         verbose=True,
     )
 
+    # ── 7. Monitoring Analytics (5 tables) ───────────────────────────────────
+    monitoring_analytics = SparkSubmitOperator(
+        task_id="monitoring_analytics",
+        conn_id="spark_default",
+        application=f"{SPARK_JOBS_DIR}/monitoring_analytics.py",
+        py_files=f"{SPARK_JOBS_DIR}/utils.py",
+        jars=MYSQL_JAR,
+        env_vars=SPARK_ENV,
+        conf=SPARK_CONF,
+        name="monitoring_analytics_{{ ds }}",
+        verbose=True,
+    )
+
     pipeline_complete = EmptyOperator(task_id="pipeline_complete")
 
     # ── Dependencies ──────────────────────────────────────────────────────────
@@ -201,6 +215,6 @@ with DAG(
         >> check_mysql
         >> init_schema
         >> wait_for_spark
-        >> [financial_analytics, operational_analytics, patient_analytics]
+        >> [financial_analytics, operational_analytics, patient_analytics, monitoring_analytics]
         >> pipeline_complete
     )

@@ -14,10 +14,16 @@ DAG_ID = config.DAG_ID
 @tool
 def query_analytics_db(sql: str) -> str:
     """Run a read-only MySQL SELECT query on the healthcare database.
-    Use for questions about revenue, patients, doctors, appointments, treatments, billing.
-    Tables: patients, doctors, appointments, treatments, billing,
-    and 15 analytics_* tables (analytics_monthly_revenue, analytics_revenue_by_doctor,
-    analytics_appointment_status, analytics_patient_retention, etc).
+    Use for questions about revenue, patients, doctors, appointments, treatments, billing,
+    vitals anomalies, lab reports, hospital events, ICU codes, or department activity.
+    Operational tables: patients, doctors, appointments, treatments, billing,
+      departments, patient_vitals, lab_reports, hospital_events, icu_codes.
+    Analytics tables (20 total, pre-aggregated by Spark):
+      analytics_monthly_revenue, analytics_revenue_by_doctor,
+      analytics_appointment_status, analytics_patient_retention,
+      analytics_vitals_patient_summary, analytics_lab_test_summary,
+      analytics_hospital_event_summary, analytics_department_activity,
+      analytics_icu_code_summary, and more.
     Only SELECT statements are allowed."""
     if not sql.strip().upper().startswith("SELECT"):
         return "Error: only SELECT statements are allowed."
@@ -78,7 +84,7 @@ def get_pipeline_status() -> str:
 
 @tool
 def trigger_analytics_pipeline() -> str:
-    """Trigger a new Airflow DAG run to refresh all 15 analytics tables.
+    """Trigger a new Airflow DAG run to refresh all 20 analytics tables.
     Only use this after the user has explicitly confirmed they want to run the pipeline."""
     try:
         r = httpx.post(
@@ -146,8 +152,9 @@ def check_infrastructure_health() -> str:
 
 @tool
 def get_kafka_topic_info() -> str:
-    """Get message counts and offset info for the 5 Kafka topics:
-    patients, doctors, appointments, treatments, billing.
+    """Get message counts and offset info for all 10 Kafka topics:
+    patients, doctors, appointments, treatments, billing,
+    departments, patient_vitals, lab_reports, hospital_events, icu_codes.
     Use when asked about event counts, producer status, or how many messages have been processed."""
     try:
         r = httpx.get(
@@ -157,7 +164,10 @@ def get_kafka_topic_info() -> str:
         r.raise_for_status()
         topics = r.json().get("topics", [])
 
-        target = {"patients", "doctors", "appointments", "treatments", "billing"}
+        target = {
+            "patients", "doctors", "appointments", "treatments", "billing",
+            "departments", "patient_vitals", "lab_reports", "hospital_events", "icu_codes",
+        }
         lines = ["Kafka topics (healthcare-cluster):"]
         for t in topics:
             name = t.get("name", "")
@@ -222,10 +232,14 @@ def get_flink_job_status() -> str:
 
 @tool
 def get_mysql_row_counts() -> str:
-    """Get live row counts for all 5 operational MySQL tables:
-    patients, doctors, appointments, treatments, billing.
+    """Get live row counts for all 10 operational MySQL tables:
+    patients, doctors, appointments, treatments, billing,
+    departments, patient_vitals, lab_reports, hospital_events, icu_codes.
     Use when asked how many records exist, data volume, or current database size."""
-    tables = ["patients", "doctors", "appointments", "treatments", "billing"]
+    tables = [
+        "patients", "doctors", "appointments", "treatments", "billing",
+        "departments", "patient_vitals", "lab_reports", "hospital_events", "icu_codes",
+    ]
     lines = ["MySQL healthcare DB — operational table row counts:"]
     for t in tables:
         try:
@@ -233,6 +247,124 @@ def get_mysql_row_counts() -> str:
             lines.append(f"  {t}: {count:,} rows")
         except Exception as e:
             lines.append(f"  {t}: error — {e}")
+    return "\n".join(lines)
+
+
+# ── Tool 8 — Monitoring summary ───────────────────────────────────────────────
+
+@tool
+def get_monitoring_summary() -> str:
+    """Get a full real-time monitoring snapshot covering patient vitals anomalies,
+    lab test flag distribution, hospital event breakdown, department activity,
+    and ICU code activations.
+    Use when asked about anomalies, critical patients, ICU alerts, ward health,
+    lab results, hospital events, or department performance."""
+    lines = ["=== Monitoring Snapshot ===\n"]
+
+    try:
+        rows = db.query("""
+            SELECT COALESCE(SUM(anomaly_count),0) AS total_anomalies,
+                   COALESCE(ROUND(AVG(anomaly_rate_pct),1),0) AS avg_anomaly_rate,
+                   COUNT(*) AS total_patients
+            FROM analytics_vitals_patient_summary
+        """)
+        r = rows[0]
+        lines.append(
+            f"Vitals: {r['total_anomalies']} anomalies across {r['total_patients']} patients "
+            f"(avg rate: {r['avg_anomaly_rate']}%)"
+        )
+        top = db.query("""
+            SELECT patient_id, anomaly_count, anomaly_rate_pct,
+                   avg_heart_rate, avg_spo2
+            FROM analytics_vitals_patient_summary
+            WHERE anomaly_count > 0
+            ORDER BY anomaly_rate_pct DESC LIMIT 3
+        """)
+        for p in top:
+            lines.append(
+                f"  {p['patient_id']}: {p['anomaly_rate_pct']}% anomaly rate | "
+                f"HR {p['avg_heart_rate']} | SpO2 {p['avg_spo2']}"
+            )
+    except Exception as e:
+        lines.append(f"Vitals: error — {e}")
+
+    lines.append("")
+
+    try:
+        rows = db.query("""
+            SELECT SUM(total_tests) AS total, SUM(critical_count) AS critical,
+                   SUM(high_count) AS high, SUM(normal_count) AS normal
+            FROM analytics_lab_test_summary
+        """)
+        r = rows[0]
+        lines.append(
+            f"Lab Tests: {r['total']} total | {r['critical']} critical | "
+            f"{r['high']} high | {r['normal']} normal"
+        )
+        critical_tests = db.query("""
+            SELECT test_name, critical_count, critical_rate_pct, total_revenue
+            FROM analytics_lab_test_summary
+            WHERE critical_count > 0
+            ORDER BY critical_count DESC LIMIT 3
+        """)
+        for t in critical_tests:
+            lines.append(
+                f"  {t['test_name']}: {t['critical_count']} critical ({t['critical_rate_pct']}%) | "
+                f"₹{t['total_revenue']:,.0f} revenue"
+            )
+    except Exception as e:
+        lines.append(f"Lab Tests: error — {e}")
+
+    lines.append("")
+
+    try:
+        rows = db.query("""
+            SELECT event_type, event_count, total_amount
+            FROM analytics_hospital_event_summary
+            ORDER BY event_count DESC
+        """)
+        lines.append("Hospital Events:")
+        for r in rows:
+            lines.append(f"  {r['event_type']}: {r['event_count']} events | ₹{r['total_amount']:,.0f}")
+    except Exception as e:
+        lines.append(f"Hospital Events: error — {e}")
+
+    lines.append("")
+
+    try:
+        rows = db.query("""
+            SELECT department_name, total_events, total_icu_codes,
+                   critical_icu_count, total_amount
+            FROM analytics_department_activity
+            ORDER BY total_amount DESC
+        """)
+        lines.append("Department Activity:")
+        for r in rows:
+            lines.append(
+                f"  {r['department_name']}: {r['total_events']} events | "
+                f"{r['total_icu_codes']} ICU codes ({r['critical_icu_count']} critical) | "
+                f"₹{r['total_amount']:,.0f}"
+            )
+    except Exception as e:
+        lines.append(f"Department Activity: error — {e}")
+
+    lines.append("")
+
+    try:
+        rows = db.query("""
+            SELECT code_type, severity, code_count, total_amount
+            FROM analytics_icu_code_summary
+            ORDER BY code_count DESC
+        """)
+        lines.append("ICU Codes:")
+        for r in rows:
+            lines.append(
+                f"  {r['code_type']} [{r['severity']}]: {r['code_count']} activations | "
+                f"₹{r['total_amount']:,.0f}"
+            )
+    except Exception as e:
+        lines.append(f"ICU Codes: error — {e}")
+
     return "\n".join(lines)
 
 
@@ -244,4 +376,5 @@ ALL_TOOLS = [
     get_kafka_topic_info,
     get_flink_job_status,
     get_mysql_row_counts,
+    get_monitoring_summary,
 ]

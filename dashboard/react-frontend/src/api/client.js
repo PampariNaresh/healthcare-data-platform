@@ -49,9 +49,23 @@ export const chat = {
 }
 
 export const dataEntry = {
-  patient:     (d) => api.post('/data-entry/patient',     d),
-  doctor:      (d) => api.post('/data-entry/doctor',      d),
-  appointment: (d) => api.post('/data-entry/appointment', d),
-  treatment:   (d) => api.post('/data-entry/treatment',   d),
-  billing:     (d) => api.post('/data-entry/billing',     d),
+  patient:       (d) => api.post('/data-entry/patient',        d),
+  doctor:        (d) => api.post('/data-entry/doctor',         d),
+  appointment:   (d) => api.post('/data-entry/appointment',    d),
+  treatment:     (d) => api.post('/data-entry/treatment',      d),
+  billing:       (d) => api.post('/data-entry/billing',        d),
+  department:    (d) => api.post('/data-entry/department',     d),
+  patientVitals: (d) => api.post('/data-entry/patient-vitals', d),
+  labReport:     (d) => api.post('/data-entry/lab-report',     d),
+  hospitalEvent: (d) => api.post('/data-entry/hospital-event', d),
+  icuCode:       (d) => api.post('/data-entry/icu-code',       d),
+}
+
+export const monitoring = {
+  summary:            () => api.get('/monitoring/summary'),
+  vitalsSummary:      () => api.get('/monitoring/vitals-summary'),
+  labTests:           () => api.get('/monitoring/lab-tests'),
+  hospitalEvents:     () => api.get('/monitoring/hospital-events'),
+  departmentActivity: () => api.get('/monitoring/department-activity'),
+  icuCodes:           () => api.get('/monitoring/icu-codes'),
 }

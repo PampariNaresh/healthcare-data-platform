@@ -192,3 +192,70 @@ CREATE TABLE IF NOT EXISTS analytics_top_doctors_scorecard (
     last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (doctor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 16. Vitals Summary per Patient ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS analytics_vitals_patient_summary (
+    patient_id              VARCHAR(10)     NOT NULL,
+    total_readings          INT             NOT NULL DEFAULT 0,
+    anomaly_count           INT             NOT NULL DEFAULT 0,
+    anomaly_rate_pct        DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+    avg_heart_rate          DECIMAL(6,1)    NOT NULL DEFAULT 0.0,
+    avg_spo2                DECIMAL(5,1)    NOT NULL DEFAULT 0.0,
+    avg_systolic            DECIMAL(6,1)    NOT NULL DEFAULT 0.0,
+    avg_diastolic           DECIMAL(6,1)    NOT NULL DEFAULT 0.0,
+    avg_temperature         DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+    avg_respiratory_rate    DECIMAL(5,1)    NOT NULL DEFAULT 0.0,
+    last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (patient_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 17. Lab Test Distribution ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS analytics_lab_test_summary (
+    test_name               VARCHAR(100)    NOT NULL,
+    total_tests             INT             NOT NULL DEFAULT 0,
+    normal_count            INT             NOT NULL DEFAULT 0,
+    low_count               INT             NOT NULL DEFAULT 0,
+    high_count              INT             NOT NULL DEFAULT 0,
+    critical_count          INT             NOT NULL DEFAULT 0,
+    critical_rate_pct       DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+    avg_amount              DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    total_revenue           DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (test_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 18. Hospital Event Type Summary ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS analytics_hospital_event_summary (
+    event_type              VARCHAR(50)     NOT NULL,
+    event_count             INT             NOT NULL DEFAULT 0,
+    total_amount            DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    avg_amount              DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (event_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 19. Department Activity ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS analytics_department_activity (
+    department_id           VARCHAR(10)     NOT NULL,
+    department_name         VARCHAR(100)    NOT NULL,
+    hospital_branch         VARCHAR(100)    DEFAULT NULL,
+    total_events            INT             NOT NULL DEFAULT 0,
+    total_icu_codes         INT             NOT NULL DEFAULT 0,
+    critical_icu_count      INT             NOT NULL DEFAULT 0,
+    total_event_amount      DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    total_icu_amount        DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    total_amount            DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (department_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 20. ICU Code Summary ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS analytics_icu_code_summary (
+    code_type               VARCHAR(50)     NOT NULL,
+    severity                VARCHAR(20)     NOT NULL,
+    code_count              INT             NOT NULL DEFAULT 0,
+    total_amount            DECIMAL(12,2)   NOT NULL DEFAULT 0.00,
+    avg_amount              DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    last_updated            TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (code_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
