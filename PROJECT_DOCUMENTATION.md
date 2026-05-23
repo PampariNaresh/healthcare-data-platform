@@ -1191,6 +1191,8 @@ erDiagram
     treatments   ||--o{ billing      : "billed as"
 ```
 
+> **Full diagram with all columns:** [ER_DIAGRAMS.md — Section 1](./ER_DIAGRAMS.md#1-operational-tables----initsql)
+
 ### Column Reference
 
 **patients** — `patient_id` PK · `first_name` · `last_name` · `gender` · `date_of_birth` · `contact_number` · `address` · `registration_date` · `insurance_provider` · `insurance_number` · `email` (UNIQUE)
