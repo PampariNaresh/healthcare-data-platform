@@ -101,3 +101,107 @@ CREATE TABLE IF NOT EXISTS billing (
     CONSTRAINT fk_bill_treatment FOREIGN KEY (treatment_id)
         REFERENCES treatments (treatment_id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: departments  (master data — must exist before hospital_events/icu_codes)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS departments (
+    department_id    VARCHAR(10)      NOT NULL,
+    department_name  VARCHAR(100)     NOT NULL,
+    hospital_branch  VARCHAR(100)     DEFAULT NULL,
+    PRIMARY KEY (department_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: patient_vitals
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS patient_vitals (
+    event_id              VARCHAR(36)      NOT NULL,
+    patient_id            VARCHAR(10)      NOT NULL,
+    hospital              VARCHAR(100)     DEFAULT NULL,
+    ward                  VARCHAR(50)      DEFAULT NULL,
+    heart_rate            INT              NOT NULL,
+    spo2                  DECIMAL(5, 1)    NOT NULL,
+    systolic              INT              NOT NULL,
+    diastolic             INT              NOT NULL,
+    temperature_celsius   DECIMAL(4, 1)    NOT NULL,
+    respiratory_rate      INT              NOT NULL,
+    is_anomaly            TINYINT(1)       NOT NULL DEFAULT 0,
+    ts                    DATETIME         NOT NULL,
+    PRIMARY KEY (event_id),
+    KEY idx_vitals_patient  (patient_id),
+    KEY idx_vitals_ts       (ts),
+    CONSTRAINT fk_vitals_patient FOREIGN KEY (patient_id)
+        REFERENCES patients (patient_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: lab_reports
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS lab_reports (
+    report_id       VARCHAR(36)      NOT NULL,
+    patient_id      VARCHAR(10)      NOT NULL,
+    doctor_id       VARCHAR(10)      NOT NULL,
+    hospital        VARCHAR(100)     DEFAULT NULL,
+    test_name       VARCHAR(100)     NOT NULL,
+    value           DECIMAL(10, 3)   NOT NULL,
+    unit            VARCHAR(20)      DEFAULT NULL,
+    normal_range    VARCHAR(50)      DEFAULT NULL,
+    flag            VARCHAR(20)      NOT NULL,
+    amount          DECIMAL(10, 2)   NOT NULL DEFAULT 0.00,
+    ts              DATETIME         NOT NULL,
+    PRIMARY KEY (report_id),
+    KEY idx_lab_patient  (patient_id),
+    KEY idx_lab_doctor   (doctor_id),
+    KEY idx_lab_ts       (ts),
+    CONSTRAINT fk_lab_patient FOREIGN KEY (patient_id)
+        REFERENCES patients (patient_id) ON DELETE CASCADE,
+    CONSTRAINT fk_lab_doctor  FOREIGN KEY (doctor_id)
+        REFERENCES doctors  (doctor_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: hospital_events
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS hospital_events (
+    event_id        VARCHAR(36)      NOT NULL,
+    patient_id      VARCHAR(10)      NOT NULL,
+    department_id   VARCHAR(10)      NOT NULL,
+    hospital        VARCHAR(100)     DEFAULT NULL,
+    ward            VARCHAR(50)      DEFAULT NULL,
+    event_type      VARCHAR(50)      NOT NULL,
+    amount          DECIMAL(10, 2)   NOT NULL DEFAULT 0.00,
+    ts              DATETIME         NOT NULL,
+    PRIMARY KEY (event_id),
+    KEY idx_hevt_patient  (patient_id),
+    KEY idx_hevt_dept     (department_id),
+    KEY idx_hevt_ts       (ts),
+    CONSTRAINT fk_hevt_patient FOREIGN KEY (patient_id)
+        REFERENCES patients     (patient_id)    ON DELETE CASCADE,
+    CONSTRAINT fk_hevt_dept    FOREIGN KEY (department_id)
+        REFERENCES departments  (department_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Table: icu_codes
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS icu_codes (
+    code_id         VARCHAR(36)      NOT NULL,
+    patient_id      VARCHAR(10)      NOT NULL,
+    department_id   VARCHAR(10)      NOT NULL,
+    hospital        VARCHAR(100)     DEFAULT NULL,
+    ward            VARCHAR(50)      DEFAULT NULL,
+    code_type       VARCHAR(50)      NOT NULL,
+    severity        VARCHAR(20)      NOT NULL,
+    amount          DECIMAL(10, 2)   NOT NULL DEFAULT 0.00,
+    status          VARCHAR(20)      NOT NULL DEFAULT 'Activated',
+    ts              DATETIME         NOT NULL,
+    PRIMARY KEY (code_id),
+    KEY idx_icu_patient  (patient_id),
+    KEY idx_icu_dept     (department_id),
+    KEY idx_icu_ts       (ts),
+    CONSTRAINT fk_icu_patient FOREIGN KEY (patient_id)
+        REFERENCES patients     (patient_id)    ON DELETE CASCADE,
+    CONSTRAINT fk_icu_dept    FOREIGN KEY (department_id)
+        REFERENCES departments  (department_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
