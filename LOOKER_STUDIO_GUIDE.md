@@ -125,3 +125,53 @@ Add the following charts using `queries/patient_dashboard.sql`.
 - **Sharing:** Click Share → anyone with link can view (free)
 - **Scheduled email:** Report settings → Schedule email delivery → set frequency + recipient
 - **Refresh:** Looker Studio refreshes data automatically every 12 hours or click Refresh now
+
+---
+
+## How to Name Data Sources (Queries) in Looker Studio
+
+Each SQL query is saved as a named **Data Source** in Looker Studio.
+
+### When Creating a New Data Source
+
+1. Go to **Resource → Manage added data sources → Add a data source**
+2. Select **MySQL** → your connection
+3. Toggle **Custom Query** ON
+4. Paste the SQL query
+5. At the top of the page click **"Untitled Data Source"** → type your name
+6. Click **Connect** → **Add to Report**
+
+### To Rename an Existing Data Source
+
+1. **Resource → Manage added data sources**
+2. Find the data source → click the **pencil (Edit) icon**
+3. Click the name at the top → rename it
+4. Click **Done**
+
+### Recommended Naming Convention
+
+Use the prefix **HC -** so all healthcare data sources are grouped together.
+
+| SQL Query | Data Source Name |
+|-----------|-----------------|
+| revenue_kpis | HC - Revenue KPIs |
+| revenue_by_doctor | HC - Revenue by Doctor |
+| revenue_by_specialization | HC - Revenue by Specialization |
+| revenue_by_branch | HC - Revenue by Branch |
+| monthly_revenue | HC - Monthly Revenue |
+| payment_breakdown | HC - Payment Breakdown |
+| outstanding_by_status | HC - Outstanding Payments |
+| treatment_cost | HC - Treatment Cost |
+| workload_kpis | HC - Workload KPIs |
+| top_doctors | HC - Top Doctors Scorecard |
+| doctor_workload | HC - Doctor Workload |
+| appt_status | HC - Appointment Status |
+| peak_hours | HC - Peak Hours |
+| patient_kpis | HC - Patient KPIs |
+| new_patient_kpi | HC - New Patient KPI |
+| insurance_spending | HC - Insurance Spending |
+| retention | HC - Patient Retention |
+| age_group_spend | HC - Age Group Spend |
+| age_group_reasons | HC - Age Group Reasons |
+| new_patient_trend | HC - New Patient Trend |
+| gender_split | HC - Gender Split |
