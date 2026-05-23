@@ -1179,65 +1179,11 @@ not shown on dashboard])
 
 ## 4.11 ER Diagram — Operational Tables (init.sql)
 
-Full entity-relationship diagram for the 5 operational tables in the `healthcare` MySQL database on EC21.
-All foreign-key constraints, primary keys, and data types are reflected exactly from `EC21/mysql/init.sql`.
+Entity-relationship diagram for the 5 operational tables in the `healthcare` MySQL database (EC21).
+Foreign-key direction, cardinality, and delete rules are taken directly from `EC21/mysql/init.sql`.
 
 ```mermaid
 erDiagram
-    patients {
-        varchar patient_id PK
-        varchar first_name
-        varchar last_name
-        char    gender
-        date    date_of_birth
-        varchar contact_number
-        varchar address
-        date    registration_date
-        varchar insurance_provider
-        varchar insurance_number
-        varchar email
-    }
-
-    doctors {
-        varchar  doctor_id PK
-        varchar  first_name
-        varchar  last_name
-        varchar  specialization
-        varchar  phone_number
-        tinyint  years_experience
-        varchar  hospital_branch
-        varchar  email
-    }
-
-    appointments {
-        varchar appointment_id PK
-        varchar patient_id FK
-        varchar doctor_id FK
-        date    appointment_date
-        time    appointment_time
-        varchar reason_for_visit
-        varchar status
-    }
-
-    treatments {
-        varchar treatment_id PK
-        varchar appointment_id FK
-        varchar treatment_type
-        varchar description
-        decimal cost
-        date    treatment_date
-    }
-
-    billing {
-        varchar bill_id PK
-        varchar patient_id FK
-        varchar treatment_id FK
-        date    bill_date
-        decimal amount
-        varchar payment_method
-        varchar payment_status
-    }
-
     patients     ||--o{ appointments : "books"
     doctors      ||--o{ appointments : "handles"
     appointments ||--o{ treatments   : "leads to"
@@ -1245,213 +1191,65 @@ erDiagram
     treatments   ||--o{ billing      : "billed as"
 ```
 
-| Relationship | FK Column | ON DELETE | Notes |
-|---|---|---|---|
-| patients → appointments | appointments.patient_id | CASCADE | Deleting patient removes appointments |
-| doctors → appointments | appointments.doctor_id | RESTRICT | Cannot delete doctor with appointments |
-| appointments → treatments | treatments.appointment_id | CASCADE | Deleting appointment removes treatments |
-| patients → billing | billing.patient_id | CASCADE | Deleting patient removes billing records |
-| treatments → billing | billing.treatment_id | RESTRICT | Cannot delete treatment with billing |
-| patients.email | — | — | UNIQUE KEY uq_patient_email |
-| doctors.email | — | — | UNIQUE KEY uq_doctor_email |
+### Column Reference
+
+**patients** — `patient_id` PK · `first_name` · `last_name` · `gender` · `date_of_birth` · `contact_number` · `address` · `registration_date` · `insurance_provider` · `insurance_number` · `email` (UNIQUE)
+
+**doctors** — `doctor_id` PK · `first_name` · `last_name` · `specialization` · `phone_number` · `years_experience` · `hospital_branch` · `email` (UNIQUE)
+
+**appointments** — `appointment_id` PK · `patient_id` FK → patients (CASCADE) · `doctor_id` FK → doctors (RESTRICT) · `appointment_date` · `appointment_time` · `reason_for_visit` · `status`
+
+**treatments** — `treatment_id` PK · `appointment_id` FK → appointments (CASCADE) · `treatment_type` · `description` · `cost` · `treatment_date`
+
+**billing** — `bill_id` PK · `patient_id` FK → patients (CASCADE) · `treatment_id` FK → treatments (RESTRICT) · `bill_date` · `amount` · `payment_method` · `payment_status`
+
 
 ---
 
-## 4.12 ER Diagram — Analytics Tables (analytical_schema.sql)
+## 4.12 Analytics Table Schemas (analytical_schema.sql)
 
-All 15 pre-aggregated analytics tables computed by Spark and stored in the same `healthcare` MySQL database.
+All 15 pre-aggregated analytics tables written by Spark to the `healthcare` MySQL database (EC21).
 These tables have **no FK constraints** — they are fully denormalised snapshots refreshed daily by Airflow.
-Grouped by Spark job. Primary keys reflect the natural grouping keys used in each aggregation.
+
+> **Spark write pattern:** `mode("overwrite")` — each daily run fully replaces all rows.
+> The `last_updated` TIMESTAMP reflects when each Spark job completed.
+
+---
 
 ### Financial Analytics — 7 tables (`financial_analytics.py`)
 
-```mermaid
-erDiagram
-    analytics_revenue_by_doctor {
-        varchar   doctor_id PK
-        varchar   full_name
-        varchar   specialization
-        varchar   hospital_branch
-        int       total_bills
-        decimal   total_revenue
-        decimal   avg_bill_amount
-        decimal   max_bill_amount
-        timestamp last_updated
-    }
+| Table | Primary Key | Key Columns |
+|---|---|---|
+| `analytics_revenue_by_doctor` | `doctor_id` | full_name, specialization, hospital_branch, total_bills, total_revenue, avg_bill_amount, max_bill_amount |
+| `analytics_revenue_by_specialization` | `specialization` | doctor_count, total_appointments, total_revenue, avg_revenue_per_doc, avg_revenue_per_appt |
+| `analytics_revenue_by_branch` | `hospital_branch` | doctor_count, total_appointments, total_revenue, avg_revenue_per_appt |
+| `analytics_billing_payment` | `(payment_method, payment_status)` | bill_count, total_amount, avg_amount, pct_of_total_revenue |
+| `analytics_outstanding_payments` | `payment_status` | bill_count, total_outstanding, avg_outstanding, oldest_bill_date |
+| `analytics_monthly_revenue` | `(year, month)` | bill_count, total_revenue, avg_revenue, mom_growth_pct |
+| `analytics_treatment_cost` | `treatment_type` | treatment_count, avg_cost, min_cost, max_cost, total_cost |
 
-    analytics_revenue_by_specialization {
-        varchar   specialization PK
-        int       doctor_count
-        int       total_appointments
-        decimal   total_revenue
-        decimal   avg_revenue_per_doc
-        decimal   avg_revenue_per_appt
-        timestamp last_updated
-    }
-
-    analytics_revenue_by_branch {
-        varchar   hospital_branch PK
-        int       doctor_count
-        int       total_appointments
-        decimal   total_revenue
-        decimal   avg_revenue_per_appt
-        timestamp last_updated
-    }
-
-    analytics_billing_payment {
-        varchar   payment_method PK
-        varchar   payment_status PK
-        int       bill_count
-        decimal   total_amount
-        decimal   avg_amount
-        decimal   pct_of_total_revenue
-        timestamp last_updated
-    }
-
-    analytics_outstanding_payments {
-        varchar   payment_status PK
-        int       bill_count
-        decimal   total_outstanding
-        decimal   avg_outstanding
-        date      oldest_bill_date
-        timestamp last_updated
-    }
-
-    analytics_monthly_revenue {
-        smallint  year PK
-        tinyint   month PK
-        int       bill_count
-        decimal   total_revenue
-        decimal   avg_revenue
-        decimal   mom_growth_pct
-        timestamp last_updated
-    }
-
-    analytics_treatment_cost {
-        varchar   treatment_type PK
-        int       treatment_count
-        decimal   avg_cost
-        decimal   min_cost
-        decimal   max_cost
-        decimal   total_cost
-        timestamp last_updated
-    }
-
-    analytics_revenue_by_doctor ||--o{ analytics_revenue_by_specialization : "grouped by"
-    analytics_revenue_by_doctor ||--o{ analytics_revenue_by_branch : "grouped by"
-    analytics_billing_payment   ||--o{ analytics_outstanding_payments : "filters to"
-```
+---
 
 ### Operational Analytics — 4 tables (`operational_analytics.py`)
 
-```mermaid
-erDiagram
-    analytics_appointment_status {
-        varchar   doctor_id PK
-        varchar   full_name
-        varchar   specialization
-        varchar   appt_status
-        int       status_count
-        decimal   pct_of_total
-        timestamp last_updated
-    }
+| Table | Primary Key | Key Columns |
+|---|---|---|
+| `analytics_appointment_status` | `(doctor_id, status)` | full_name, specialization, count, pct_of_total |
+| `analytics_doctor_workload` | `doctor_id` | full_name, total_appointments, completed_appointments, unique_patients, no_show_count, cancellation_count, no_show_rate_pct, cancellation_rate_pct, completion_rate_pct |
+| `analytics_peak_hours` | `hour_of_day` | appointment_count, completed_count, no_show_count, completion_rate_pct |
+| `analytics_top_doctors_scorecard` | `doctor_id` | full_name, total_revenue, completion_rate_pct, unique_patients, revenue_rank, completion_rank, overall_score |
 
-    analytics_doctor_workload {
-        varchar   doctor_id PK
-        varchar   full_name
-        varchar   specialization
-        varchar   hospital_branch
-        int       total_appointments
-        int       completed_appointments
-        int       unique_patients
-        int       no_show_count
-        int       cancellation_count
-        decimal   no_show_rate_pct
-        decimal   cancellation_rate_pct
-        decimal   completion_rate_pct
-        timestamp last_updated
-    }
-
-    analytics_peak_hours {
-        tinyint   hour_of_day PK
-        int       appointment_count
-        int       completed_count
-        int       no_show_count
-        decimal   completion_rate_pct
-        timestamp last_updated
-    }
-
-    analytics_top_doctors_scorecard {
-        varchar   doctor_id PK
-        varchar   full_name
-        varchar   specialization
-        varchar   hospital_branch
-        decimal   total_revenue
-        decimal   completion_rate_pct
-        int       unique_patients
-        int       revenue_rank
-        int       completion_rank
-        decimal   overall_score
-        timestamp last_updated
-    }
-
-    analytics_doctor_workload ||--o{ analytics_appointment_status : "breaks down by status"
-    analytics_doctor_workload ||--o{ analytics_top_doctors_scorecard : "scored into"
-```
-
-> `analytics_appointment_status` actual PK is composite `(doctor_id, status)` — rendered as single `doctor_id` PK here since GitHub Mermaid does not support composite PKs in relationship lines. Column `count` renamed `status_count` to avoid Mermaid reserved-word conflict.
+---
 
 ### Patient Analytics — 4 tables (`patient_analytics.py`)
 
-```mermaid
-erDiagram
-    analytics_patient_spending {
-        varchar   insurance_provider PK
-        int       patient_count
-        decimal   avg_age
-        int       male_count
-        int       female_count
-        decimal   avg_spend
-        decimal   total_spend
-        timestamp last_updated
-    }
+| Table | Primary Key | Key Columns |
+|---|---|---|
+| `analytics_patient_spending` | `insurance_provider` | patient_count, avg_age, male_count, female_count, avg_spend, total_spend |
+| `analytics_patient_age_groups` | `age_group` | patient_count, total_appointments, total_spend, avg_spend, most_common_reason |
+| `analytics_patient_retention` | `visit_segment` | patient_count, pct_of_patients, avg_spend, total_revenue |
+| `analytics_new_patient_trend` | `(year, month)` | new_patients, male_count, female_count |
 
-    analytics_patient_age_groups {
-        varchar   age_group PK
-        int       patient_count
-        int       total_appointments
-        decimal   total_spend
-        decimal   avg_spend
-        varchar   most_common_reason
-        timestamp last_updated
-    }
-
-    analytics_patient_retention {
-        varchar   visit_segment PK
-        int       patient_count
-        decimal   pct_of_patients
-        decimal   avg_spend
-        decimal   total_revenue
-        timestamp last_updated
-    }
-
-    analytics_new_patient_trend {
-        smallint  trend_year PK
-        tinyint   trend_month
-        int       new_patients
-        int       male_count
-        int       female_count
-        timestamp last_updated
-    }
-
-    analytics_patient_spending  ||--o{ analytics_patient_age_groups : "segmented by age"
-    analytics_patient_retention ||--o{ analytics_new_patient_trend  : "tracks over time"
-```
-
-> `analytics_new_patient_trend` actual PK is composite `(year, month)` — rendered as single `trend_year` PK here. `year` and `month` renamed `trend_year` / `trend_month` to avoid Mermaid parser conflicts with SQL function names used as column identifiers.
-
-> **Spark write pattern:** All analytics tables use `mode("overwrite")` in Spark JDBC writer.
-> Each daily Airflow run fully replaces the data. The `last_updated` timestamp reflects when each Spark job completed.
 
 # 5. Functional Requirements
 
@@ -1791,70 +1589,8 @@ docker compose logs -f airflow-init
 
 ## 8.1 Operational Schema — ERD
 
-The operational schema consists of 5 tables in the `healthcare` MySQL database, representing the core entities of a hospital management system.
-
-```mermaid
-erDiagram
-    PATIENTS {
-        VARCHAR patient_id PK
-        VARCHAR first_name
-        VARCHAR last_name
-        CHAR gender
-        DATE date_of_birth
-        VARCHAR contact_number
-        TEXT address
-        DATE registration_date
-        VARCHAR insurance_provider
-        VARCHAR insurance_number
-        VARCHAR email
-    }
-
-    DOCTORS {
-        VARCHAR doctor_id PK
-        VARCHAR first_name
-        VARCHAR last_name
-        VARCHAR specialization
-        VARCHAR phone_number
-        INT years_experience
-        VARCHAR hospital_branch
-        VARCHAR email
-    }
-
-    APPOINTMENTS {
-        VARCHAR appointment_id PK
-        VARCHAR patient_id FK
-        VARCHAR doctor_id FK
-        DATE appointment_date
-        TIME appointment_time
-        VARCHAR reason_for_visit
-        VARCHAR status
-    }
-
-    TREATMENTS {
-        VARCHAR treatment_id PK
-        VARCHAR appointment_id FK
-        VARCHAR treatment_type
-        TEXT description
-        DECIMAL cost
-        DATE treatment_date
-    }
-
-    BILLING {
-        VARCHAR bill_id PK
-        VARCHAR patient_id FK
-        VARCHAR treatment_id FK
-        DATE bill_date
-        DECIMAL amount
-        VARCHAR payment_method
-        VARCHAR payment_status
-    }
-
-    PATIENTS ||--o{ APPOINTMENTS : "has"
-    DOCTORS ||--o{ APPOINTMENTS : "conducts"
-    APPOINTMENTS ||--|| TREATMENTS : "leads to"
-    TREATMENTS ||--|| BILLING : "billed as"
-    PATIENTS ||--o{ BILLING : "pays"
-```
+> See **Section 4.11** for the entity-relationship diagram of the 5 operational tables (patients, doctors, appointments, treatments, billing) with FK cardinality and delete rules.
+> See **Section 4.12** for the full column reference of all 15 analytics tables.
 
 ## 8.2 Analytical Tables Reference
 
