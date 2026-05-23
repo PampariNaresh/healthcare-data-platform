@@ -1,10 +1,10 @@
 # ER Diagrams — Healthcare Data Platform
 
-Detailed entity-relationship diagrams for all 20 tables in the `healthcare` MySQL database.
+Detailed entity-relationship diagrams for all 30 tables in the `healthcare` MySQL database.
 Each diagram is generated from the actual SQL schema files.
 
-- **Operational tables** — `EC21/mysql/init.sql` (5 tables, real FK constraints)
-- **Analytics tables** — `EC22/mysql/analytical_schema.sql` (15 tables, no FK constraints — daily Spark snapshots)
+- **Operational tables** — `EC21/mysql/init.sql` (10 tables: 5 clinical + 5 monitoring, real FK constraints)
+- **Analytics tables** — `EC22/airflow/dags/analytical_schema.sql` (20 tables, no FK constraints — daily Spark snapshots)
 
 ---
 
@@ -89,7 +89,89 @@ erDiagram
 
 ---
 
-## 2. Financial Analytics — `analytical_schema.sql` (7 tables)
+## 2. Monitoring Operational Tables — `init.sql` (5 tables)
+
+Five monitoring and clinical-observation tables. All are processed by `monitoring_job.py`.
+`departments` seeds before patients/vitals to satisfy FK references.
+
+```mermaid
+erDiagram
+    departments {
+        varchar department_id    PK
+        varchar department_name
+        varchar head_doctor_id   FK
+        varchar location
+        int     capacity
+        varchar dept_status
+    }
+
+    patient_vitals {
+        varchar vitals_id        PK
+        varchar patient_id       FK
+        int     heart_rate
+        decimal spo2
+        int     systolic_bp
+        int     diastolic_bp
+        decimal temperature
+        int     respiratory_rate
+        varchar anomaly_flag
+        datetime recorded_at
+    }
+
+    lab_reports {
+        varchar report_id        PK
+        varchar patient_id       FK
+        varchar test_name
+        decimal test_value
+        varchar test_unit
+        varchar normal_range
+        varchar flag
+        datetime reported_at
+    }
+
+    hospital_events {
+        varchar event_id         PK
+        varchar patient_id       FK
+        varchar department_id    FK
+        varchar event_type
+        varchar description
+        decimal amount
+        datetime event_timestamp
+    }
+
+    icu_codes {
+        varchar code_id          PK
+        varchar patient_id       FK
+        varchar department_id    FK
+        varchar code_type
+        varchar severity
+        varchar response_team
+        varchar outcome
+        datetime activated_at
+    }
+
+    departments     ||--o{ hospital_events : "hosts"
+    departments     ||--o{ icu_codes       : "responds"
+    patients        ||--o{ patient_vitals  : "monitored by"
+    patients        ||--o{ lab_reports     : "has"
+    patients        ||--o{ hospital_events : "involved in"
+    patients        ||--o{ icu_codes       : "triggers"
+    doctors         ||--o| departments     : "heads"
+```
+
+| FK Constraint | Column | References | ON DELETE |
+|---|---|---|---|
+| fk_dept_head | departments.head_doctor_id | doctors.doctor_id | SET NULL |
+| fk_vitals_patient | patient_vitals.patient_id | patients.patient_id | CASCADE |
+| fk_lab_patient | lab_reports.patient_id | patients.patient_id | CASCADE |
+| fk_event_patient | hospital_events.patient_id | patients.patient_id | CASCADE |
+| fk_event_dept | hospital_events.department_id | departments.department_id | RESTRICT |
+| fk_icu_patient | icu_codes.patient_id | patients.patient_id | CASCADE |
+| fk_icu_dept | icu_codes.department_id | departments.department_id | RESTRICT |
+
+---
+
+## 3. Financial Analytics — `analytical_schema.sql` (7 tables)
 
 Pre-aggregated by `EC22/spark/jobs/financial_analytics.py`. No FK constraints between tables.
 All tables include `last_updated TIMESTAMP` (refreshed every daily Airflow run).
@@ -173,7 +255,7 @@ erDiagram
 
 ---
 
-## 3. Operational Analytics — `analytical_schema.sql` (4 tables)
+## 4. Operational Analytics — `analytical_schema.sql` (4 tables)
 
 Pre-aggregated by `EC22/spark/jobs/operational_analytics.py`. No FK constraints between tables.
 
@@ -234,7 +316,7 @@ erDiagram
 
 ---
 
-## 4. Patient Analytics — `analytical_schema.sql` (4 tables)
+## 5. Patient Analytics — `analytical_schema.sql` (4 tables)
 
 Pre-aggregated by `EC22/spark/jobs/patient_analytics.py`. No FK constraints between tables.
 
@@ -279,6 +361,68 @@ erDiagram
         int       new_patients
         int       male_count
         int       female_count
+        timestamp last_updated
+    }
+```
+
+---
+
+## 6. Monitoring Analytics — `analytical_schema.sql` (5 tables)
+
+Pre-aggregated by `EC22/spark/jobs/monitoring_analytics.py`. No FK constraints between tables.
+These tables feed the **Monitoring** dashboard page.
+
+```mermaid
+erDiagram
+    analytics_vitals_patient_summary {
+        varchar   patient_id             PK
+        int       reading_count
+        decimal   avg_heart_rate
+        decimal   avg_spo2
+        decimal   avg_systolic_bp
+        decimal   avg_diastolic_bp
+        decimal   avg_temperature
+        int       anomaly_count
+        decimal   anomaly_rate_pct
+        timestamp last_updated
+    }
+
+    analytics_lab_test_summary {
+        varchar   test_name              PK
+        int       total_tests
+        int       normal_count
+        int       low_count
+        int       high_count
+        int       critical_count
+        decimal   avg_value
+        timestamp last_updated
+    }
+
+    analytics_hospital_event_summary {
+        varchar   event_type             PK
+        int       event_count
+        decimal   total_amount
+        decimal   avg_amount
+        int       unique_patients
+        timestamp last_updated
+    }
+
+    analytics_icu_code_summary {
+        varchar   code_type              PK
+        varchar   severity
+        int       code_count
+        int       unique_patients
+        varchar   most_common_outcome
+        timestamp last_updated
+    }
+
+    analytics_department_activity {
+        varchar   department_id          PK
+        varchar   department_name
+        int       total_events
+        int       total_icu_codes
+        int       critical_icu_count
+        decimal   total_amount
         timestamp last_updated
     }
 ```
