@@ -51,6 +51,8 @@ SPARK_CONF = {
     "spark.sql.legacy.timeParserPolicy": "LEGACY",
     "spark.executor.memory":             "1g",
     "spark.driver.memory":               "1g",
+    "spark.eventLog.enabled":            "true",
+    "spark.eventLog.dir":               "file:/opt/spark/event-logs",
 }
 
 # ── Default args ──────────────────────────────────────────────────────────────

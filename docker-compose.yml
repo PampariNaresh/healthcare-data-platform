@@ -6,6 +6,7 @@ networks:
 volumes:
   postgres-data:
   airflow-logs:
+  spark-event-logs:
 
 x-airflow-common: &airflow-common
   build:
@@ -32,6 +33,7 @@ x-airflow-common: &airflow-common
     - ./airflow/plugins:/opt/airflow/plugins
     - airflow-logs:/opt/airflow/logs
     - ./spark/jobs:/opt/spark/jobs
+    - spark-event-logs:/opt/spark/event-logs
   depends_on:
     postgres:
       condition: service_healthy
@@ -136,6 +138,8 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./spark/jobs:/opt/spark/jobs
+      - ./pyspark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - spark-event-logs:/opt/spark/event-logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
@@ -165,6 +169,28 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./spark/jobs:/opt/spark/jobs
+      - ./pyspark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - spark-event-logs:/opt/spark/event-logs
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ── Spark History Server ─────────────────────────────────────────────────────
+  spark-history:
+    build:
+      context: ./pyspark
+      dockerfile: Dockerfile
+    container_name: ec22-spark-history
+    user: root
+    restart: unless-stopped
+    networks:
+      - ec22-net
+    ports:
+      - 18080:18080
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
+    volumes:
+      - ./pyspark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - spark-event-logs:/opt/spark/event-logs
     depends_on:
       spark-master:
         condition: service_healthy
