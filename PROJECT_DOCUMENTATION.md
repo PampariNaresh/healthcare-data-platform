@@ -1350,8 +1350,8 @@ erDiagram
         varchar   doctor_id PK
         varchar   full_name
         varchar   specialization
-        varchar   status PK
-        int       count
+        varchar   appt_status
+        int       status_count
         decimal   pct_of_total
         timestamp last_updated
     }
@@ -1395,9 +1395,11 @@ erDiagram
         timestamp last_updated
     }
 
-    analytics_doctor_workload ||--|| analytics_appointment_status : "expands"
-    analytics_doctor_workload ||--|| analytics_top_doctors_scorecard : "scores into"
+    analytics_doctor_workload ||--o{ analytics_appointment_status : "breaks down by status"
+    analytics_doctor_workload ||--o{ analytics_top_doctors_scorecard : "scored into"
 ```
+
+> `analytics_appointment_status` actual PK is composite `(doctor_id, status)` — rendered as single `doctor_id` PK here since GitHub Mermaid does not support composite PKs in relationship lines. Column `count` renamed `status_count` to avoid Mermaid reserved-word conflict.
 
 ### Patient Analytics — 4 tables (`patient_analytics.py`)
 
@@ -1434,17 +1436,19 @@ erDiagram
     }
 
     analytics_new_patient_trend {
-        smallint  year PK
-        tinyint   month PK
+        smallint  trend_year PK
+        tinyint   trend_month
         int       new_patients
         int       male_count
         int       female_count
         timestamp last_updated
     }
 
-    analytics_patient_spending   ||--o{ analytics_patient_age_groups : "cross-cuts"
-    analytics_patient_retention  ||--o{ analytics_new_patient_trend  : "tracks over"
+    analytics_patient_spending  ||--o{ analytics_patient_age_groups : "segmented by age"
+    analytics_patient_retention ||--o{ analytics_new_patient_trend  : "tracks over time"
 ```
+
+> `analytics_new_patient_trend` actual PK is composite `(year, month)` — rendered as single `trend_year` PK here. `year` and `month` renamed `trend_year` / `trend_month` to avoid Mermaid parser conflicts with SQL function names used as column identifiers.
 
 > **Spark write pattern:** All analytics tables use `mode("overwrite")` in Spark JDBC writer.
 > Each daily Airflow run fully replaces the data. The `last_updated` timestamp reflects when each Spark job completed.
