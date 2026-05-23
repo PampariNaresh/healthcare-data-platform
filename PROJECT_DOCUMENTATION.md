@@ -1175,6 +1175,282 @@ not shown on dashboard])
 
 ---
 
+---
+
+## 4.11 ER Diagram — Operational Tables (init.sql)
+
+Full entity-relationship diagram for the 5 operational tables in the `healthcare` MySQL database on EC21.
+All foreign-key constraints, data types, primary keys, and unique keys are reflected exactly from `init.sql`.
+
+```mermaid
+erDiagram
+    patients {
+        VARCHAR10  patient_id        PK
+        VARCHAR50  first_name
+        VARCHAR50  last_name
+        CHAR1      gender
+        DATE       date_of_birth
+        VARCHAR15  contact_number
+        VARCHAR255 address
+        DATE       registration_date
+        VARCHAR100 insurance_provider
+        VARCHAR20  insurance_number
+        VARCHAR100 email             UK
+    }
+
+    doctors {
+        VARCHAR10  doctor_id         PK
+        VARCHAR50  first_name
+        VARCHAR50  last_name
+        VARCHAR100 specialization
+        VARCHAR15  phone_number
+        TINYINT    years_experience
+        VARCHAR100 hospital_branch
+        VARCHAR100 email             UK
+    }
+
+    appointments {
+        VARCHAR10  appointment_id    PK
+        VARCHAR10  patient_id        FK
+        VARCHAR10  doctor_id         FK
+        DATE       appointment_date
+        TIME       appointment_time
+        VARCHAR255 reason_for_visit
+        VARCHAR20  status
+    }
+
+    treatments {
+        VARCHAR10  treatment_id      PK
+        VARCHAR10  appointment_id    FK
+        VARCHAR100 treatment_type
+        VARCHAR255 description
+        DECIMAL    cost
+        DATE       treatment_date
+    }
+
+    billing {
+        VARCHAR10  bill_id           PK
+        VARCHAR10  patient_id        FK
+        VARCHAR10  treatment_id      FK
+        DATE       bill_date
+        DECIMAL    amount
+        VARCHAR50  payment_method
+        VARCHAR20  payment_status
+    }
+
+    patients      ||--o{ appointments : "books (CASCADE delete)"
+    doctors       ||--o{ appointments : "handles (RESTRICT delete)"
+    appointments  ||--o{ treatments   : "leads to (CASCADE delete)"
+    patients      ||--o{ billing      : "billed to (CASCADE delete)"
+    treatments    ||--o| billing      : "billed as (RESTRICT delete)"
+```
+
+> **Key constraints from `init.sql`:**
+> - `patients.email` — `UNIQUE KEY uq_patient_email`
+> - `doctors.email` — `UNIQUE KEY uq_doctor_email`
+> - `appointments.patient_id` — `FK → patients` with `ON DELETE CASCADE`
+> - `appointments.doctor_id` — `FK → doctors` with `ON DELETE RESTRICT`
+> - `treatments.appointment_id` — `FK → appointments` with `ON DELETE CASCADE`
+> - `billing.patient_id` — `FK → patients` with `ON DELETE CASCADE`
+> - `billing.treatment_id` — `FK → treatments` with `ON DELETE RESTRICT`
+> - All tables: `ENGINE=InnoDB`, `CHARSET=utf8mb4`, upsert via `ON DUPLICATE KEY UPDATE` from Flink
+
+---
+
+## 4.12 ER Diagram — Analytics Tables (analytical_schema.sql)
+
+All 15 pre-aggregated analytics tables written by Spark and stored in the same `healthcare` MySQL database.
+Analytics tables have **no FK constraints between them** — they are denormalised snapshots derived from the
+operational tables by three daily Spark jobs. Grouped below by Spark job.
+
+### Financial Analytics (7 tables — `financial_analytics.py`)
+
+```mermaid
+erDiagram
+    analytics_revenue_by_doctor {
+        VARCHAR10   doctor_id          PK
+        VARCHAR101  full_name
+        VARCHAR100  specialization
+        VARCHAR100  hospital_branch
+        INT         total_bills
+        DECIMAL12   total_revenue
+        DECIMAL10   avg_bill_amount
+        DECIMAL10   max_bill_amount
+        TIMESTAMP   last_updated
+    }
+
+    analytics_revenue_by_specialization {
+        VARCHAR100  specialization         PK
+        INT         doctor_count
+        INT         total_appointments
+        DECIMAL12   total_revenue
+        DECIMAL10   avg_revenue_per_doc
+        DECIMAL10   avg_revenue_per_appt
+        TIMESTAMP   last_updated
+    }
+
+    analytics_revenue_by_branch {
+        VARCHAR100  hospital_branch        PK
+        INT         doctor_count
+        INT         total_appointments
+        DECIMAL12   total_revenue
+        DECIMAL10   avg_revenue_per_appt
+        TIMESTAMP   last_updated
+    }
+
+    analytics_billing_payment {
+        VARCHAR50   payment_method         PK
+        VARCHAR20   payment_status         PK
+        INT         bill_count
+        DECIMAL12   total_amount
+        DECIMAL10   avg_amount
+        DECIMAL5    pct_of_total_revenue
+        TIMESTAMP   last_updated
+    }
+
+    analytics_outstanding_payments {
+        VARCHAR20   payment_status         PK
+        INT         bill_count
+        DECIMAL12   total_outstanding
+        DECIMAL10   avg_outstanding
+        DATE        oldest_bill_date
+        TIMESTAMP   last_updated
+    }
+
+    analytics_monthly_revenue {
+        SMALLINT    year                   PK
+        TINYINT     month                  PK
+        INT         bill_count
+        DECIMAL12   total_revenue
+        DECIMAL10   avg_revenue
+        DECIMAL6    mom_growth_pct
+        TIMESTAMP   last_updated
+    }
+
+    analytics_treatment_cost {
+        VARCHAR100  treatment_type         PK
+        INT         treatment_count
+        DECIMAL10   avg_cost
+        DECIMAL10   min_cost
+        DECIMAL10   max_cost
+        DECIMAL12   total_cost
+        TIMESTAMP   last_updated
+    }
+
+    analytics_revenue_by_doctor         }|..|| analytics_revenue_by_specialization : "rolls up to"
+    analytics_revenue_by_doctor         }|..|| analytics_revenue_by_branch          : "rolls up to"
+    analytics_billing_payment           }|..|| analytics_outstanding_payments        : "filters to"
+    analytics_billing_payment           }|..|| analytics_monthly_revenue             : "aggregates to"
+```
+
+### Operational Analytics (4 tables — `operational_analytics.py`)
+
+```mermaid
+erDiagram
+    analytics_appointment_status {
+        VARCHAR10   doctor_id          PK
+        VARCHAR101  full_name
+        VARCHAR100  specialization
+        VARCHAR20   status             PK
+        INT         count
+        DECIMAL5    pct_of_total
+        TIMESTAMP   last_updated
+    }
+
+    analytics_doctor_workload {
+        VARCHAR10   doctor_id                  PK
+        VARCHAR101  full_name
+        VARCHAR100  specialization
+        VARCHAR100  hospital_branch
+        INT         total_appointments
+        INT         completed_appointments
+        INT         unique_patients
+        INT         no_show_count
+        INT         cancellation_count
+        DECIMAL5    no_show_rate_pct
+        DECIMAL5    cancellation_rate_pct
+        DECIMAL5    completion_rate_pct
+        TIMESTAMP   last_updated
+    }
+
+    analytics_peak_hours {
+        TINYINT     hour_of_day        PK
+        INT         appointment_count
+        INT         completed_count
+        INT         no_show_count
+        DECIMAL5    completion_rate_pct
+        TIMESTAMP   last_updated
+    }
+
+    analytics_top_doctors_scorecard {
+        VARCHAR10   doctor_id              PK
+        VARCHAR101  full_name
+        VARCHAR100  specialization
+        VARCHAR100  hospital_branch
+        DECIMAL12   total_revenue
+        DECIMAL5    completion_rate_pct
+        INT         unique_patients
+        INT         revenue_rank
+        INT         completion_rank
+        DECIMAL8    overall_score
+        TIMESTAMP   last_updated
+    }
+
+    analytics_doctor_workload      ||..|| analytics_appointment_status    : "derives"
+    analytics_doctor_workload      ||..|| analytics_top_doctors_scorecard  : "scores into"
+```
+
+### Patient Analytics (4 tables — `patient_analytics.py`)
+
+```mermaid
+erDiagram
+    analytics_patient_spending {
+        VARCHAR100  insurance_provider  PK
+        INT         patient_count
+        DECIMAL5    avg_age
+        INT         male_count
+        INT         female_count
+        DECIMAL10   avg_spend
+        DECIMAL12   total_spend
+        TIMESTAMP   last_updated
+    }
+
+    analytics_patient_age_groups {
+        VARCHAR20   age_group           PK
+        INT         patient_count
+        INT         total_appointments
+        DECIMAL12   total_spend
+        DECIMAL10   avg_spend
+        VARCHAR255  most_common_reason
+        TIMESTAMP   last_updated
+    }
+
+    analytics_patient_retention {
+        VARCHAR20   visit_segment       PK
+        INT         patient_count
+        DECIMAL5    pct_of_patients
+        DECIMAL10   avg_spend
+        DECIMAL12   total_revenue
+        TIMESTAMP   last_updated
+    }
+
+    analytics_new_patient_trend {
+        SMALLINT    year                PK
+        TINYINT     month               PK
+        INT         new_patients
+        INT         male_count
+        INT         female_count
+        TIMESTAMP   last_updated
+    }
+
+    analytics_patient_spending     }|..|| analytics_patient_age_groups  : "cross-cuts"
+    analytics_patient_retention    }|..|| analytics_new_patient_trend   : "tracks over"
+```
+
+> **Spark write pattern:** All analytics tables use `TRUNCATE` then `overwrite` mode in Spark
+> (`df.write.format("jdbc").mode("overwrite")`), meaning each daily Airflow run completely replaces
+> the data. The `last_updated` `TIMESTAMP` column reflects the exact moment each Spark job completed.
+
 # 5. Functional Requirements
 
 Functional requirements are organized by system layer. Each requirement is assigned a unique ID, priority (High / Medium / Low), and status.
