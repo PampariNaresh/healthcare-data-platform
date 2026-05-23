@@ -337,64 +337,21 @@ When a user types a question in the Chat page, FastAPI runs the LangChain manual
 
 # 4. UML Diagrams
 
-## 4.1 Use Case Diagram
+This chapter contains all UML diagrams generated directly from the actual codebase.
+All diagrams use **Mermaid** syntax (renders natively on GitHub).
 
-**Actors:**
-- **Data Producer:** Automated system (Faker producer container) that generates healthcare events
-- **Dashboard User:** Hospital analyst or administrator using the React dashboard
-- **AI Agent:** LangChain + LLaMA model that acts as an intelligent analyst
-- **System Administrator:** DevOps/admin who manages the infrastructure
+---
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Healthcare Data Platform               │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Data Ingestion                                    │   │
-│  │   (UC-01) Generate synthetic healthcare events    │◄──┤ Data Producer
-│  │   (UC-02) Publish events to Kafka topics          │   │
-│  │   (UC-03) Validate events (5 entity validators)   │   │
-│  │   (UC-04) Persist valid records to MySQL          │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Analytics & Dashboard                             │   │
-│  │   (UC-05) View financial analytics                │◄──┤ Dashboard User
-│  │   (UC-06) View operational analytics              │   │
-│  │   (UC-07) View patient analytics                  │   │
-│  │   (UC-08) Monitor pipeline status                 │   │
-│  │   (UC-09) Trigger analytics pipeline              │   │
-│  │   (UC-10) Enter new healthcare records            │   │
-│  │   (UC-11) Monitor infrastructure health           │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ AI Chat                                           │   │
-│  │   (UC-12) Ask natural language questions          │◄──┤ Dashboard User
-│  │   (UC-13) Query analytics database via AI         │   │
-│  │   (UC-14) Check pipeline + infra health via AI    │◄──┤ AI Agent
-│  │   (UC-15) Generate insights report                │   │
-│  │   (UC-16) Trigger pipeline via AI with confirm    │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Administration                                    │   │
-│  │   (UC-17) Deploy services via Docker Compose      │◄──┤ Sys Admin
-│  │   (UC-18) Configure Airflow connections           │   │
-│  │   (UC-19) Monitor container health               │   │
-│  │   (UC-20) Rotate API keys / credentials          │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
+## 4.1 Class Diagram — Domain Entities (MySQL Schema)
 
-## 4.2 Class Diagram
-
-The core domain entities and their relationships:
+Based on `EC21/mysql/init.sql` and Flink Row type definitions in `healthcare_job.py`.
 
 ```mermaid
 classDiagram
+    direction LR
+
     class Patient {
-        +String patient_id
+        +String patient_id PK
         +String first_name
         +String last_name
         +String gender
@@ -405,11 +362,10 @@ classDiagram
         +String insurance_provider
         +String insurance_number
         +String email
-        +validate() bool
     }
 
     class Doctor {
-        +String doctor_id
+        +String doctor_id PK
         +String first_name
         +String last_name
         +String specialization
@@ -417,366 +373,805 @@ classDiagram
         +int years_experience
         +String hospital_branch
         +String email
-        +validate() bool
     }
 
     class Appointment {
-        +String appointment_id
-        +String patient_id
-        +String doctor_id
+        +String appointment_id PK
+        +String patient_id FK
+        +String doctor_id FK
         +Date appointment_date
         +Time appointment_time
         +String reason_for_visit
         +String status
-        +validate() bool
     }
 
     class Treatment {
-        +String treatment_id
-        +String appointment_id
+        +String treatment_id PK
+        +String appointment_id FK
         +String treatment_type
         +String description
         +float cost
         +Date treatment_date
-        +validate() bool
     }
 
     class Billing {
-        +String bill_id
-        +String patient_id
-        +String treatment_id
+        +String bill_id PK
+        +String patient_id FK
+        +String treatment_id FK
         +Date bill_date
         +float amount
         +String payment_method
         +String payment_status
-        +validate() bool
     }
 
-    class KafkaProducer {
+    Patient  "1" --> "0..*" Appointment : has
+    Doctor   "1" --> "0..*" Appointment : conducts
+    Appointment "1" --> "1"  Treatment  : leads to
+    Treatment   "1" --> "1"  Billing    : generates
+    Patient  "1" --> "0..*" Billing    : pays
+```
+
+---
+
+## 4.2 Class Diagram — Flink Stream Processing Pipeline
+
+Based on `EC21/flink/jobs/healthcare_job.py`.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class StreamExecutionEnvironment {
+        +set_parallelism(n: int)
+        +enable_checkpointing(interval: int)
+        +from_source(source, watermark, name) DataStream
+        +execute(name: str)
+    }
+
+    class KafkaSource {
         +String bootstrap_servers
-        +float send_interval
-        +int max_events
-        +wait_for_kafka()
-        +ensure_topics()
-        +gen_patient(pid) Patient
-        +gen_doctor(did) Doctor
-        +gen_appointment(aid, pid, did) Appointment
-        +gen_treatment(tid, aid, date) Treatment
-        +gen_billing(bid, pid, tid, date, amount) Billing
-        +main()
+        +String topic
+        +String group_id
+        +KafkaOffsetsInitializer starting_offsets
+        +SimpleStringSchema deserializer
+        +builder() KafkaSourceBuilder
+        +build() KafkaSource
     }
 
     class ValidateAndConvert {
         +String topic
-        +validator function
-        +converter function
-        +process_element(value, ctx)
+        +Callable validator
+        +Callable converter
+        +process_element(value, ctx: Context)
     }
+
+    class ProcessFunction {
+        <<abstract>>
+        +process_element(value, ctx)*
+    }
+
+    class OutputTag {
+        +String tag_id : invalid-records
+        +TypeInformation type_info : Types.STRING
+    }
+
+    class JdbcSink {
+        +String sql
+        +TypeInformation type_info
+        +JdbcConnectionOptions conn_opts
+        +JdbcExecutionOptions exec_opts
+        +sink() SinkFunction
+    }
+
+    class JdbcConnectionOptions {
+        +String url
+        +String driver_name : com.mysql.cj.jdbc.Driver
+        +String username
+        +String password
+        +JdbcConnectionOptionsBuilder builder()
+    }
+
+    class JdbcExecutionOptions {
+        +int batch_interval_ms : 1000
+        +int batch_size : 100
+        +int max_retries : 3
+        +builder() JdbcExecutionOptionsBuilder
+    }
+
+    class Validators {
+        <<utility>>
+        +validate_patient(d: dict) Tuple
+        +validate_doctor(d: dict) Tuple
+        +validate_appointment(d: dict) Tuple
+        +validate_treatment(d: dict) Tuple
+        +validate_billing(d: dict) Tuple
+        +_parse_date(s: str) Date
+        +_parse_time(s: str) Time
+        +_valid_email(s: str) bool
+    }
+
+    class Converters {
+        <<utility>>
+        +convert_patient(d: dict) Row
+        +convert_doctor(d: dict) Row
+        +convert_appointment(d: dict) Row
+        +convert_treatment(d: dict) Row
+        +convert_billing(d: dict) Row
+    }
+
+    ValidateAndConvert  --|>  ProcessFunction
+    StreamExecutionEnvironment --> KafkaSource        : from_source()
+    StreamExecutionEnvironment --> ValidateAndConvert : process()
+    ValidateAndConvert  -->  Validators  : uses
+    ValidateAndConvert  -->  Converters  : uses
+    ValidateAndConvert  -->  OutputTag   : invalid records
+    ValidateAndConvert  -->  JdbcSink    : valid records
+    JdbcSink --> JdbcConnectionOptions
+    JdbcSink --> JdbcExecutionOptions
+```
+
+---
+
+## 4.3 Class Diagram — FastAPI Application & Routers
+
+Based on `EC22/dashboard/fastapi-backend/main.py`, `config.py`, `db.py`, and all router files.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class FastAPIApp {
+        +str title : Healthcare Analytics API
+        +str version : 1.0.0
+        +CORSMiddleware middleware
+        +include_router(router, prefix, tags)
+        +get("/health") health()
+    }
+
+    class Config {
+        <<module>>
+        +str MYSQL_HOST
+        +int MYSQL_PORT
+        +str MYSQL_DATABASE
+        +str MYSQL_USER
+        +str MYSQL_PASSWORD
+        +str KAFKA_BOOTSTRAP
+        +str AIRFLOW_API_URL
+        +str AIRFLOW_USER
+        +str AIRFLOW_PASSWORD
+        +str GROQ_API_KEY
+        +str DAG_ID
+    }
+
+    class Database {
+        <<module>>
+        +query(sql: str) List[dict]
+    }
+
+    class FinancialRouter {
+        +APIRouter router
+        +prefix : /api/financial
+        +revenue_by_doctor() List
+        +revenue_by_specialization() List
+        +revenue_by_branch() List
+        +billing_payment() List
+        +outstanding_payments() List
+        +monthly_revenue() List
+        +treatment_cost() List
+    }
+
+    class OperationalRouter {
+        +APIRouter router
+        +prefix : /api/operational
+        +appointment_status() List
+        +doctor_workload() List
+        +peak_hours() List
+        +scorecard() List
+    }
+
+    class PatientsRouter {
+        +APIRouter router
+        +prefix : /api/patients
+        +patient_spending() List
+        +age_groups() List
+        +retention() dict
+        +new_trend() List
+    }
+
+    class PipelineRouter {
+        +APIRouter router
+        +prefix : /api/pipeline
+        +get_status() dict
+        +trigger_pipeline() dict
+    }
+
+    class DataEntryRouter {
+        +APIRouter router
+        +prefix : /api/data-entry
+        +KafkaProducer producer
+        +submit_patient(data) dict
+        +submit_doctor(data) dict
+        +submit_appointment(data) dict
+        +submit_treatment(data) dict
+        +submit_billing(data) dict
+    }
+
+    class InfrastructureRouter {
+        +APIRouter router
+        +prefix : /api/infrastructure
+        +health_check() dict
+        -_http_probe(url: str) dict
+        -_tcp_probe(host: str, port: int) dict
+    }
+
+    class ChatRouter {
+        +APIRouter router
+        +prefix : /api/chat
+        +chat_message(body: ChatMessage) StreamingResponse
+        +generate_insights() InsightsResponse
+    }
+
+    class ChatMessage {
+        <<Pydantic Model>>
+        +str message
+        +str session_id
+        +List[dict] history
+    }
+
+    class InsightsResponse {
+        <<Pydantic Model>>
+        +str insights
+        +str generated_at
+    }
+
+    FastAPIApp --> FinancialRouter
+    FastAPIApp --> OperationalRouter
+    FastAPIApp --> PatientsRouter
+    FastAPIApp --> PipelineRouter
+    FastAPIApp --> DataEntryRouter
+    FastAPIApp --> InfrastructureRouter
+    FastAPIApp --> ChatRouter
+    FinancialRouter   --> Database
+    OperationalRouter --> Database
+    PatientsRouter    --> Database
+    DataEntryRouter   --> Config
+    PipelineRouter    --> Config
+    InfrastructureRouter --> Config
+    ChatRouter --> ChatMessage
+    ChatRouter --> InsightsResponse
+    ChatRouter --> LangChainAgent
+```
+
+---
+
+## 4.4 Class Diagram — LangChain AI Agent & Tools
+
+Based on `EC22/dashboard/fastapi-backend/langchain_agent.py` and `tools.py`.
+
+```mermaid
+classDiagram
+    direction TB
 
     class LangChainAgent {
-        +List tools
-        +ChatGroq llm
-        +String system_prompt
-        +run_agent(input, history) str
+        <<module>>
+        +str SYSTEM_PROMPT
+        +dict _TOOL_MAP
+        +run_agent(input_text: str, chat_history: list) str
+        -_to_lc_messages(history: list) List
+        -_make_llm() ChatGroq
+        +get_agent() _FakeAgentExecutor
     }
 
-    Patient "1" --> "many" Appointment : has
-    Doctor "1" --> "many" Appointment : conducts
-    Appointment "1" --> "1" Treatment : leads to
-    Treatment "1" --> "1" Billing : billed via
-    Patient "1" --> "many" Billing : pays
-    KafkaProducer --> Patient : generates
-    KafkaProducer --> Doctor : generates
-    KafkaProducer --> Appointment : generates
-    KafkaProducer --> Treatment : generates
-    KafkaProducer --> Billing : generates
-    ValidateAndConvert --> Patient : validates
-    ValidateAndConvert --> Doctor : validates
-    LangChainAgent --> Billing : queries via SQL tool
+    class _FakeAgentExecutor {
+        +ainvoke(inputs: dict) dict
+    }
+
+    class ChatGroq {
+        +str model : llama-4-scout-17b-16e-instruct
+        +str api_key
+        +bool streaming : False
+        +int max_tokens : 2048
+        +int temperature : 0
+        +bind_tools(tools: list) RunnableBinding
+        +ainvoke(messages: list) AIMessage
+    }
+
+    class SystemMessage {
+        +str content
+    }
+
+    class HumanMessage {
+        +str content
+    }
+
+    class AIMessage {
+        +str content
+        +list tool_calls
+    }
+
+    class ToolMessage {
+        +str content
+        +str tool_call_id
+    }
+
+    class BaseTool {
+        <<abstract>>
+        +str name
+        +str description
+        +invoke(args: dict) str
+    }
+
+    class QueryAnalyticsDB {
+        +name : query_analytics_db
+        +invoke(sql: str) str
+    }
+
+    class GetPipelineStatus {
+        +name : get_pipeline_status
+        +invoke() str
+    }
+
+    class TriggerAnalyticsPipeline {
+        +name : trigger_analytics_pipeline
+        +invoke() str
+    }
+
+    class CheckInfrastructureHealth {
+        +name : check_infrastructure_health
+        +invoke() str
+    }
+
+    class GetKafkaTopicInfo {
+        +name : get_kafka_topic_info
+        +invoke() str
+    }
+
+    class GetFlinkJobStatus {
+        +name : get_flink_job_status
+        +invoke() str
+    }
+
+    class GetMySQLRowCounts {
+        +name : get_mysql_row_counts
+        +invoke() str
+    }
+
+    LangChainAgent      --> _FakeAgentExecutor
+    LangChainAgent      --> ChatGroq
+    LangChainAgent      --> SystemMessage
+    LangChainAgent      --> HumanMessage
+    LangChainAgent      --> AIMessage
+    LangChainAgent      --> ToolMessage
+    LangChainAgent      --> QueryAnalyticsDB
+    LangChainAgent      --> GetPipelineStatus
+    LangChainAgent      --> TriggerAnalyticsPipeline
+    LangChainAgent      --> CheckInfrastructureHealth
+    LangChainAgent      --> GetKafkaTopicInfo
+    LangChainAgent      --> GetFlinkJobStatus
+    LangChainAgent      --> GetMySQLRowCounts
+    QueryAnalyticsDB         ..|> BaseTool
+    GetPipelineStatus        ..|> BaseTool
+    TriggerAnalyticsPipeline ..|> BaseTool
+    CheckInfrastructureHealth ..|> BaseTool
+    GetKafkaTopicInfo        ..|> BaseTool
+    GetFlinkJobStatus        ..|> BaseTool
+    GetMySQLRowCounts        ..|> BaseTool
 ```
 
-## 4.3 Sequence Diagram — Data Ingestion
+---
 
-This diagram shows the complete flow from producer generating an event to MySQL persistence.
+## 4.5 Class Diagram — Airflow DAG & Spark Analytics Jobs
+
+Based on `EC22/airflow/dags/healthcare_analytics_dag.py`, `spark_cluster_sensor.py`, and all Spark job files.
 
 ```mermaid
-sequenceDiagram
-    participant P as Faker Producer
-    participant K as Kafka Broker
-    participant F as PyFlink Job
-    participant V as Validator
-    participant J as JDBC Sink
-    participant M as MySQL
+classDiagram
+    direction TB
 
-    P->>K: send("appointments", key=A0001, value=JSON)
-    P->>K: send("treatments", key=T0001, value=JSON)
-    P->>K: send("billing", key=B0001, value=JSON)
-    K-->>P: ack
+    class HealthcareAnalyticsPipelineDAG {
+        +str dag_id : healthcare_analytics_pipeline
+        +str schedule_interval : 0 2 * * *
+        +bool catchup : False
+        +int max_active_runs : 1
+        +dict default_args
+        +tags : healthcare, spark, analytics
+    }
 
-    F->>K: poll(topic="appointments", group=flink-healthcare-appointments)
-    K-->>F: raw JSON string
+    class EmptyOperator {
+        +str task_id
+        +execute(context: dict)
+    }
 
-    F->>V: validate_appointment(dict)
-    alt Valid record
-        V-->>F: (True, "")
-        F->>F: convert_appointment(dict) → Row
-        F->>J: emit Row to JdbcSink
-        J->>M: INSERT INTO appointments ... ON DUPLICATE KEY UPDATE
-        M-->>J: OK
-    else Invalid record
-        V-->>F: (False, "invalid status 'Unknown'")
-        F->>F: ctx.output(INVALID_TAG, error_json)
-        F->>F: log.warning("[INVALID][appointments] ...")
-    end
+    class PythonOperator {
+        +str task_id
+        +Callable python_callable
+        +execute(context: dict)
+    }
 
-    Note over F,M: Batch write: every 1000ms or 100 rows
-    Note over F: Checkpoint every 10s — replay-safe
+    class SparkClusterSensor {
+        +str spark_master_url
+        +int min_workers : 1
+        +int poke_interval : 15
+        +int timeout : 300
+        +str mode : poke
+        +poke(context: dict) bool
+    }
+
+    class SparkSubmitOperator {
+        +str task_id
+        +str conn_id : spark_default
+        +str application
+        +str py_files
+        +str jars : mysql-connector-j.jar
+        +dict env_vars
+        +dict conf
+        +execute(context: dict)
+    }
+
+    class SparkUtils {
+        <<module: utils.py>>
+        +build_spark_session(app_name: str) SparkSession
+        +read_table(spark, table: str) DataFrame
+        +write_table(df: DataFrame, table: str)
+    }
+
+    class FinancialAnalyticsJob {
+        <<financial_analytics.py>>
+        +revenue_by_doctor(appointments, treatments, billing, doctors)
+        +revenue_by_specialization(appointments, treatments, billing, doctors)
+        +revenue_by_branch(appointments, treatments, billing, doctors)
+        +billing_payment_summary(billing)
+        +outstanding_payments(billing)
+        +monthly_revenue_trend(billing)
+        +treatment_cost_by_type(treatments)
+        +main()
+    }
+
+    class OperationalAnalyticsJob {
+        <<operational_analytics.py>>
+        +appointment_status_summary(appointments)
+        +doctor_workload(appointments, doctors)
+        +peak_appointment_hours(appointments)
+        +top_doctors_scorecard(appointments, billing, doctors)
+        +main()
+    }
+
+    class PatientAnalyticsJob {
+        <<patient_analytics.py>>
+        +patient_spending(patients, billing)
+        +patient_age_groups(patients)
+        +patient_retention(patients, appointments)
+        +new_patient_trend(patients)
+        +main()
+    }
+
+    HealthcareAnalyticsPipelineDAG --> EmptyOperator         : start, pipeline_complete
+    HealthcareAnalyticsPipelineDAG --> PythonOperator        : check_mysql, init_schema
+    HealthcareAnalyticsPipelineDAG --> SparkClusterSensor    : wait_for_spark_cluster
+    HealthcareAnalyticsPipelineDAG --> SparkSubmitOperator   : financial, operational, patient
+    SparkSubmitOperator --> FinancialAnalyticsJob  : submits
+    SparkSubmitOperator --> OperationalAnalyticsJob : submits
+    SparkSubmitOperator --> PatientAnalyticsJob    : submits
+    FinancialAnalyticsJob   --> SparkUtils
+    OperationalAnalyticsJob --> SparkUtils
+    PatientAnalyticsJob     --> SparkUtils
 ```
 
-## 4.4 Sequence Diagram — Batch Analytics Pipeline
+---
+
+## 4.6 Activity Diagram — Faker Data Producer
+
+Based on `EC21/producer/producer.py`.
 
 ```mermaid
-sequenceDiagram
-    participant S as Airflow Scheduler
-    participant D as DAG Runner
-    participant M as MySQL (EC21)
-    participant SP as Spark Cluster
-    participant AT as Analytics Tables
-
-    S->>D: trigger DAG at 02:00 UTC
-    D->>M: check_mysql_connection() — SELECT COUNT(*) FROM patients
-    M-->>D: count = 20 (OK)
-    D->>M: init_analytical_schema() — CREATE TABLE IF NOT EXISTS (×15)
-    M-->>D: tables ready
-
-    D->>SP: SparkClusterSensor — GET /json/ (poll every 15s)
-    SP-->>D: workers=1 (ready)
-
-    par Parallel Spark Jobs
-        D->>SP: SparkSubmitOperator(financial_analytics.py)
-        SP->>M: read_table(appointments, treatments, billing, doctors)
-        M-->>SP: DataFrames
-        SP->>SP: aggregate 7 financial KPIs
-        SP->>AT: write_table(analytics_revenue_by_doctor) ×7
-    and
-        D->>SP: SparkSubmitOperator(operational_analytics.py)
-        SP->>M: read_table(appointments, doctors)
-        M-->>SP: DataFrames
-        SP->>SP: aggregate 4 operational KPIs
-        SP->>AT: write_table(analytics_appointment_status) ×4
-    and
-        D->>SP: SparkSubmitOperator(patient_analytics.py)
-        SP->>M: read_table(patients, appointments, billing)
-        M-->>SP: DataFrames
-        SP->>SP: aggregate 4 patient KPIs
-        SP->>AT: write_table(analytics_patient_spending) ×4
-    end
-
-    D->>D: pipeline_complete (EmptyOperator)
-    Note over AT: 15 analytics tables refreshed
+flowchart TD
+    START([Start Producer Container]) --> A[Read env vars
+KAFKA_BOOTSTRAP_SERVERS
+SEND_INTERVAL, MAX_EVENTS]
+    A --> B[KafkaProducer connect attempt]
+    B --> C{Kafka reachable?}
+    C -->|No - attempt i of 15| D[sleep 5s]
+    D --> B
+    C -->|Timeout after 15 retries| FAIL([RuntimeError: Kafka not available])
+    C -->|Yes| E[KafkaAdminClient.list_topics]
+    E --> F{All 5 topics exist?}
+    F -->|No| G[create_topics
+patients, doctors, appointments
+treatments, billing
+partitions=1, replication=1]
+    F -->|Yes| H[Topics ready]
+    G --> H
+    H --> I[Send 20 Patients
+P001 to P020 at 50ms intervals]
+    I --> J[producer.flush]
+    J --> K[sleep 1s]
+    K --> L[Send 10 Doctors
+D001 to D010 at 50ms intervals]
+    L --> M[producer.flush]
+    M --> N[sleep 1s]
+    N --> O{MAX_EVENTS > 0 AND
+counter > MAX_EVENTS?}
+    O -->|Yes| DONE([Producer exits - restart:no])
+    O -->|No| P[Generate event triplet
+Appointment + Treatment + Billing
+random patient_id + doctor_id]
+    P --> Q[send appointments topic - key=aid]
+    Q --> R[send treatments topic - key=tid]
+    R --> S[send billing topic - key=bid]
+    S --> T[producer.flush]
+    T --> U[Log: Event counter - appt pid did cost]
+    U --> V[counter++]
+    V --> W[sleep SEND_INTERVAL=2s]
+    W --> O
 ```
 
-## 4.5 Sequence Diagram — AI Chat
+---
+
+## 4.7 Activity Diagram — PyFlink Record Validation
+
+Based on `EC21/flink/jobs/healthcare_job.py` — `ValidateAndConvert.process_element()`.
 
 ```mermaid
-sequenceDiagram
-    participant U as User (Browser)
-    participant R as React Chat Page
-    participant A as FastAPI /api/chat/message
-    participant L as LangChain Agent
-    participant G as Groq API (LLaMA 4)
-    participant T as Tool (e.g., query_analytics_db)
-    participant M as MySQL / Airflow / Flink
-
-    U->>R: types question, presses Enter
-    R->>A: POST /api/chat/message {message, history, session_id}
-    A->>A: asyncio.create_task(run_agent())
-    A-->>R: StreamingResponse (text/event-stream)
-
-    loop Tool-Calling Loop (max 8 iterations)
-        L->>G: ainvoke([SystemMessage, ...history, HumanMessage])
-        G-->>L: AIMessage with tool_calls
-
-        alt tool_calls present
-            L->>T: tool.invoke(args)
-            T->>M: SELECT / HTTP probe / REST call
-            M-->>T: result data
-            T-->>L: str(result)
-            L->>L: append ToolMessage to messages
-            A-->>R: SSE event: {type:"tool_start", tool:"query_analytics_db"}
-            A-->>R: SSE event: {type:"tool_end"}
-        else no tool_calls
-            L->>L: return response.content
-        end
-    end
-
-    A-->>R: SSE event: {type:"token", text:"Dr. Jane Smith leads with ₹4,82,350..."}
-    A-->>R: SSE event: {type:"done"}
-    R->>R: update message bubble, stop cursor
-    R->>U: display markdown response
+flowchart TD
+    START([Kafka message arrives]) --> A[process_element called
+raw string value from KafkaSource]
+    A --> B{json.loads value}
+    B -->|JSONDecodeError| C[ctx.output INVALID_TAG
+error: JSON parse error
+raw: value]
+    C --> END([End - invalid path])
+    B -->|dict OK| D{topic name?}
+    D -->|patients| E1[validate_patient dict]
+    D -->|doctors| E2[validate_doctor dict]
+    D -->|appointments| E3[validate_appointment dict]
+    D -->|treatments| E4[validate_treatment dict]
+    D -->|billing| E5[validate_billing dict]
+    E1 --> F{valid?}
+    E2 --> F
+    E3 --> F
+    E4 --> F
+    E5 --> F
+    F -->|False - error message| G[ctx.output INVALID_TAG
+error + record_id]
+    G --> H[log.warning INVALID topic error]
+    H --> END
+    F -->|True| I{topic?}
+    I -->|patients| J1[convert_patient dict Row
+ROW_NAMED 11 fields
+SQL_DATE for DOB and reg_date]
+    I -->|doctors| J2[convert_doctor dict Row
+ROW_NAMED 8 fields
+int years_experience]
+    I -->|appointments| J3[convert_appointment dict Row
+SQL_DATE + SQL_TIME]
+    I -->|treatments| J4[convert_treatment dict Row
+DOUBLE cost]
+    I -->|billing| J5[convert_billing dict Row
+DOUBLE amount]
+    J1 --> K[yield Row to main output]
+    J2 --> K
+    J3 --> K
+    J4 --> K
+    J5 --> K
+    K --> L[JdbcSink.accumulate Row in batch]
+    L --> M{batch_size == 100
+OR 1000ms elapsed?}
+    M -->|Not yet| WAIT([Wait for next record])
+    M -->|Yes| N[Execute INSERT ... ON DUPLICATE KEY UPDATE
+via JDBC to MySQL healthcare DB]
+    N --> O{Write success?}
+    O -->|Fail - retry_count lt 3| P[retry_count++]
+    P --> N
+    O -->|Fail - retry exhausted| Q[Log JDBC write error]
+    O -->|Success| R([Record persisted in MySQL])
+    Q --> END2([End - write failed])
 ```
 
-## 4.6 Activity Diagram — Flink Validation Pipeline
+---
 
-```
-START
-  │
-  ▼
-Receive raw string from Kafka topic
-  │
-  ▼
-Parse JSON ──► [JSONDecodeError?] ──YES──► Output to INVALID_TAG
-  │                                              │
-  NO                                           END (invalid path)
-  │
-  ▼
-Select entity validator based on topic
-  │
-  ▼
-Run validator(data_dict)
-  │
-  ├── [patient_id missing?] ──YES──► return (False, "missing patient_id")
-  ├── [gender not in {M,F}?] ──YES──► return (False, "invalid gender")
-  ├── [date parse fails?] ──YES──► return (False, "invalid date_of_birth")
-  ├── [email regex fails?] ──YES──► return (False, "invalid email")
-  └── [all checks pass] ──────────► return (True, "")
-  │
-  ▼
-[valid == True?]
-  │
-  ├── YES ──► Convert dict to typed Flink Row
-  │                 │
-  │                 ▼
-  │           Emit to main output stream
-  │                 │
-  │                 ▼
-  │           JdbcSink batches row
-  │                 │
-  │                 ▼
-  │           [batch full or interval elapsed?]
-  │                 │
-  │                 YES ──► Execute INSERT ... ON DUPLICATE KEY UPDATE
-  │                               │
-  │                               ▼
-  │                         MySQL confirms write
-  │
-  └── NO ──► ctx.output(INVALID_TAG, error_json)
-                  │
-                  ▼
-             log.warning("[INVALID][topic] error_message")
-                  │
-                  ▼
-             Invalid record logged (not persisted)
+## 4.8 Activity Diagram — Airflow DAG Execution
 
-CHECKPOINT (every 10 seconds):
-  → Save Kafka consumer offsets + JDBC state
-  → On restart: replay from last checkpoint offset (idempotent via upsert)
-```
+Based on `EC22/airflow/dags/healthcare_analytics_dag.py`.
 
-## 4.7 Activity Diagram — Airflow DAG Execution
-
-```
-DAG TRIGGER (02:00 UTC daily OR manual trigger)
-  │
-  ▼
-[start] EmptyOperator
-  │
-  ▼
-[check_mysql_connection] PythonOperator
-  │
-  ├── FAIL (cannot connect) ──► Retry (2×, 5min delay) ──► DAG FAILED
-  │
-  └── SUCCESS: patients table row count logged
-  │
-  ▼
-[init_analytical_schema] PythonOperator
-  │ Reads analytical_schema.sql
-  │ Executes CREATE TABLE IF NOT EXISTS for 15 tables
-  ├── FAIL ──► Retry ──► DAG FAILED
-  └── SUCCESS
-  │
-  ▼
-[wait_for_spark_cluster] SparkClusterSensor
-  │ Polls GET http://spark-master:8080/json/ every 15 seconds
-  │ Checks: workers with state=ALIVE >= 1
-  ├── TIMEOUT (300s) ──► DAG FAILED
-  └── SUCCESS: Spark ready
-  │
-  ▼ (all 3 tasks start simultaneously)
-  ┌──────────────┬──────────────────────┬──────────────────┐
-  ▼              ▼                      ▼                  │
-[financial]  [operational]          [patient]              │
-SparkSubmit  SparkSubmit            SparkSubmit            │
-  │              │                      │                  │
-  ▼              ▼                      ▼                  │
-7 tables     4 tables               4 tables               │
-  └──────────────┴──────────────────────┘                  │
-                 │                                         │
-                 ▼                                         │
-        [pipeline_complete] EmptyOperator                  │
-                 │                                         │
-                 ▼                                         │
-              DAG SUCCESS ─────────────────────────────────┘
+```mermaid
+flowchart TD
+    START([DAG Triggered
+02:00 UTC daily OR manual]) --> A[start - EmptyOperator]
+    A --> B[check_mysql_connection
+pymysql.connect host=EC21:3308
+database=healthcare]
+    B --> C{Connection OK?}
+    C -->|ConnectionError| D{retry_count lt 2?}
+    D -->|Yes| E[retry_count++ - wait 5min]
+    E --> B
+    D -->|No| FAIL([DAG FAILED - check_mysql_connection])
+    C -->|OK| F[SELECT COUNT star FROM patients
+Log row count]
+    F --> G[init_analytical_schema
+Open analytical_schema.sql
+Split by semicolon]
+    G --> H[For each SQL statement
+CREATE TABLE IF NOT EXISTS]
+    H --> I{All 15 tables created?}
+    I -->|Error| FAIL2([DAG FAILED - init_analytical_schema])
+    I -->|OK| J[wait_for_spark_cluster
+SparkClusterSensor]
+    J --> K[GET spark-master:8080/json/]
+    K --> L{workers with state=ALIVE
+count >= 1?}
+    L -->|No| M{elapsed lt 300s?}
+    M -->|Yes| N[sleep 15s]
+    N --> K
+    M -->|Timeout| FAIL3([DAG FAILED - Spark not ready])
+    L -->|Yes| O[Fan-out - 3 parallel SparkSubmitOperators]
+    O --> P1[financial_analytics.py
+Spark job submitted]
+    O --> P2[operational_analytics.py
+Spark job submitted]
+    O --> P3[patient_analytics.py
+Spark job submitted]
+    P1 --> Q1[read appointments treatments billing doctors
+compute 7 analytics tables
+write back to MySQL]
+    P2 --> Q2[read appointments doctors
+compute 4 analytics tables
+write back to MySQL]
+    P3 --> Q3[read patients appointments billing
+compute 4 analytics tables
+write back to MySQL]
+    Q1 --> R{All 3 jobs complete?}
+    Q2 --> R
+    Q3 --> R
+    R -->|Any failed - retries left| S[Airflow retries failed task
+wait 5min]
+    S --> R
+    R -->|All failed - no retries| FAIL4([DAG FAILED])
+    R -->|All success| T[pipeline_complete - EmptyOperator]
+    T --> DONE([DAG SUCCESS
+15 analytics tables refreshed])
 ```
 
-## 4.8 Deployment Diagram
+---
 
+## 4.9 Activity Diagram — AI Chat Tool-Calling Loop
+
+Based on `EC22/dashboard/fastapi-backend/langchain_agent.py` and `routers/chat.py`.
+
+```mermaid
+flowchart TD
+    START([User sends message
+POST /api/chat/message]) --> A[Parse ChatMessage
+message + session_id + history]
+    A --> B[asyncio.Queue created
+asyncio.create_task run_agent]
+    B --> C[StreamingResponse returned
+media_type: text/event-stream]
+    C --> D[_to_lc_messages history
+convert dict list to LangChain messages]
+    D --> E[Build messages list
+SystemMessage SYSTEM_PROMPT
+converted history messages
+HumanMessage input_text]
+    E --> F[iteration = 0]
+    F --> G{iteration lt 8?}
+    G -->|No| H[Return: max steps reached
+Queue put SSE token]
+    H --> DONE([SSE: done event])
+    G -->|Yes| I[llm_with_tools.ainvoke messages
+Groq API call - LLaMA 4 Scout]
+    I --> J{GroqAPIError raised?
+tool_use_failed OR failed_generation}
+    J -->|Yes| K[Append correction HumanMessage
+strictly JSON format instruction]
+    K --> L[iteration++]
+    L --> G
+    J -->|No| M{response.tool_calls
+not empty?}
+    M -->|No - final answer| N[Queue put SSE
+type=token text=response.content]
+    N --> DONE
+    M -->|Yes| O[Append AIMessage to messages
+contains tool_calls list]
+    O --> P[For each tc in response.tool_calls]
+    P --> Q[Queue put SSE
+type=tool_start tool=tc.name]
+    Q --> R[_TOOL_MAP.get tc.name]
+    R --> S{Tool found?}
+    S -->|No| T[result = Unknown tool: name]
+    S -->|Yes| U[tool.invoke tc args or empty_dict
+tc args or protects against None]
+    U --> V{Exception raised?}
+    V -->|Yes| W[result = Tool error: exception_str]
+    V -->|No| X[result = tool output string]
+    T --> Y[Queue put SSE
+type=tool_end]
+    W --> Y
+    X --> Y
+    Y --> Z[Append ToolMessage
+content=str result
+tool_call_id=tc.id]
+    Z --> AA{More tool_calls
+in this response?}
+    AA -->|Yes| P
+    AA -->|No| AB[iteration++]
+    AB --> G
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          AWS Cloud — ap-south-1                             │
-│                                                                             │
-│  ┌────────────────────────────────────────┐                                 │
-│  │  EC21 — m7i-flex.large                 │                                 │
-│  │  OS: Ubuntu 22.04 LTS                  │                                 │
-│  │  IP: 65.0.80.152                       │                                 │
-│  │  Storage: 30 GB gp3 EBS               │                                 │
-│  │                                        │                                 │
-│  │  ┌─────────────────────────────────┐  │                                 │
-│  │  │  Docker Engine                  │  │                                 │
-│  │  │  Network: healthcare-net        │  │                                 │
-│  │  │                                 │  │                                 │
-│  │  │  [zookeeper]  :2181             │  │                                 │
-│  │  │  [kafka]      :9092/:29092      │  │                                 │
-│  │  │  [kafka-ui]   :8085             │  │                                 │
-│  │  │  [mysql]      :3308             │  │                                 │
-│  │  │  [producer]   (internal only)   │  │                                 │
-│  │  │  [flink-jm]   :8081             │  │                                 │
-│  │  │  [flink-tm]   (internal only)   │  │                                 │
-│  │  │  [flink-sub]  (internal only)   │  │                                 │
-│  │  └─────────────────────────────────┘  │                                 │
-│  └────────────────────────────────────────┘                                 │
-│                    ▲ JDBC :3308                                             │
-│                    │ Kafka :9092                                            │
-│                    │ HTTP :8081, :8085                                      │
-│  ┌─────────────────┴──────────────────────┐                                 │
-│  │  EC22 — m7i-flex.large                 │                                 │
-│  │  OS: Ubuntu 22.04 LTS                  │                                 │
-│  │  IP: 3.6.92.19                         │                                 │
-│  │  Storage: 30 GB gp3 EBS               │                                 │
-│  │                                        │                                 │
-│  │  ┌─────────────────────────────────┐  │                                 │
-│  │  │  Docker Engine                  │  │                                 │
-│  │  │  Network: ec22-net              │  │                                 │
-│  │  │                                 │  │                                 │
-│  │  │  [postgres]        :5432        │  │                                 │
-│  │  │  [airflow-init]    (run once)   │  │                                 │
-│  │  │  [airflow-web]     :8080        │  │                                 │
-│  │  │  [airflow-sched]   (internal)   │  │                                 │
-│  │  │  [spark-master]    :9090/:7077  │  │                                 │
-│  │  │  [spark-worker]    :8082        │  │                                 │
-│  │  │  [dashboard-api]   :8000        │  │                                 │
-│  │  │  [dashboard-ui]    :3000        │  │                                 │
-│  │  └─────────────────────────────────┘  │                                 │
-│  └────────────────────────────────────────┘                                 │
-│                    ▲                                                        │
-│                    │ HTTP/SSE                                               │
-│  ┌─────────────────┴──────────────────────┐                                 │
-│  │  External — Internet                   │                                 │
-│  │  User Browser → 3.6.92.19:3000         │                                 │
-│  │  Groq API → api.groq.com               │                                 │
-│  └────────────────────────────────────────┘                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+
+---
+
+## 4.10 Activity Diagram — Dashboard Data Entry Flow
+
+Based on `EC22/dashboard/fastapi-backend/routers/data_entry.py` and `EC22/dashboard/react-frontend/src/pages/DataEntry.jsx`.
+
+```mermaid
+flowchart TD
+    START([User opens DataEntry page]) --> A{Select entity type}
+    A -->|Patient| B1[Fill patient form
+patient_id, name, gender
+DOB, contact, insurance]
+    A -->|Doctor| B2[Fill doctor form
+doctor_id, name
+specialization, branch]
+    A -->|Appointment| B3[Fill appointment form
+appointment_id, patient_id
+doctor_id, date, time, status]
+    A -->|Treatment| B4[Fill treatment form
+treatment_id, appointment_id
+type, cost, date]
+    A -->|Billing| B5[Fill billing form
+bill_id, patient_id
+treatment_id, amount, method, status]
+    B1 --> C[Click Submit button]
+    B2 --> C
+    B3 --> C
+    B4 --> C
+    B5 --> C
+    C --> D{React client-side
+validation OK?}
+    D -->|Fail| E[Show field-level error
+Highlight invalid inputs]
+    E --> A
+    D -->|OK| F[POST /api/data-entry/entity_type
+JSON payload]
+    F --> G[FastAPI validates
+required fields present]
+    G --> H{Server validation OK?}
+    H -->|422 error| I[Show server error toast
+in React UI]
+    I --> A
+    H -->|OK| J[kafka-python KafkaProducer
+bootstrap=65.0.80.152:9092]
+    J --> K{Kafka reachable?}
+    K -->|No| L[Return 503 Kafka unavailable]
+    L --> I
+    K -->|Yes| M[producer.send
+topic=entity_type
+key=entity_id encoded
+value=json dumps payload]
+    M --> N[producer.flush]
+    N --> O[Return 200 JSON
+status=published
+topic=entity_type
+key=entity_id]
+    O --> P[React shows success toast]
+    P --> Q[EC21 Kafka receives message]
+    Q --> R[PyFlink KafkaSource polls
+group=flink-healthcare-entity]
+    R --> S[ValidateAndConvert
+process_element]
+    S --> T{Valid record?}
+    T -->|Invalid| U[INVALID_TAG side-output
+log.warning - not persisted]
+    T -->|Valid| V[Convert to typed Row
+JdbcSink batch]
+    V --> W[INSERT ... ON DUPLICATE KEY UPDATE
+MySQL healthcare DB]
+    W --> X([Record visible on dashboard
+next page refresh - 2 to 4 seconds])
+    U --> Y([Invalid record logged
+not shown on dashboard])
 ```
+
 
 ---
 
