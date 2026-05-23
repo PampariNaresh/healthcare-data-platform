@@ -1,0 +1,1722 @@
+# Healthcare Data Platform
+## Project Documentation
+
+**Version:** 1.0
+**Date:** May 2026
+**Author:** [Your Name]
+**Institution:** [Your Institution / Organization]
+**Project Type:** End-to-End Data Engineering Platform
+**Deployment:** AWS EC2 — ap-south-1 (Mumbai)
+
+---
+
+## Table of Contents
+
+1. [Introduction](#1-introduction)
+   - 1.1 Problem Statement
+   - 1.2 Motivation
+   - 1.3 Document Scope
+2. [Project Overview](#2-project-overview)
+   - 2.1 Objectives
+   - 2.2 Project Scope
+   - 2.3 Technology Stack
+   - 2.4 Project Timeline
+3. [System Architecture](#3-system-architecture)
+   - 3.1 High-Level Architecture
+   - 3.2 EC21 — Streaming Pipeline Architecture
+   - 3.3 EC22 — Analytics & Dashboard Architecture
+   - 3.4 End-to-End Data Flow
+   - 3.5 Technology Selection Rationale
+4. [UML Diagrams](#4-uml-diagrams)
+   - 4.1 Use Case Diagram
+   - 4.2 Class Diagram
+   - 4.3 Sequence Diagram — Data Ingestion
+   - 4.4 Sequence Diagram — Batch Analytics
+   - 4.5 Sequence Diagram — AI Chat
+   - 4.6 Activity Diagram — Flink Validation
+   - 4.7 Activity Diagram — Airflow DAG
+   - 4.8 Deployment Diagram
+5. [Functional Requirements](#5-functional-requirements)
+   - 5.1 Data Ingestion Requirements
+   - 5.2 Stream Processing Requirements
+   - 5.3 Batch Analytics Requirements
+   - 5.4 Dashboard & AI Requirements
+6. [Non-Functional Requirements](#6-non-functional-requirements)
+   - 6.1 Performance
+   - 6.2 Reliability & Availability
+   - 6.3 Scalability
+   - 6.4 Security
+   - 6.5 Maintainability
+7. [AWS Setup & Execution](#7-aws-setup--execution)
+   - 7.1 AWS Account & EC2 Provisioning
+   - 7.2 Security Group Configuration
+   - 7.3 EC21 Deployment Steps
+   - 7.4 EC22 Deployment Steps
+   - 7.5 Verification & Execution Guide
+8. [Data Model](#8-data-model)
+   - 8.1 Operational Schema — ERD
+   - 8.2 Analytical Tables Reference
+   - 8.3 Data Dictionary
+9. [Testing](#9-testing)
+   - 9.1 Testing Strategy
+   - 9.2 Unit Tests — Flink Validators
+   - 9.3 Integration Tests
+   - 9.4 System / End-to-End Tests
+   - 9.5 Bugs Found & Fixed
+10. [API Documentation](#10-api-documentation)
+    - 10.1 Financial, Operational & Patients Routers
+    - 10.2 Pipeline, DataEntry & Infrastructure Routers
+    - 10.3 Chat Router — SSE Protocol
+11. [Future Enhancements & Conclusion](#11-future-enhancements--conclusion)
+    - 11.1 Future Enhancements
+    - 11.2 Conclusion
+    - 11.3 References & Appendix
+
+---
+
+# 1. Introduction
+
+## 1.1 Problem Statement
+
+Healthcare organizations are among the most data-intensive institutions in the world. A single hospital generates thousands of records daily — patient registrations, doctor appointments, medical treatments, and billing transactions. Despite the volume and criticality of this data, most healthcare systems suffer from the following structural problems:
+
+**Data Fragmentation:** Operational data is spread across multiple disconnected systems — patient management, appointment scheduling, billing, and treatment records each live in separate silos. There is no unified platform that provides a real-time, holistic view of hospital operations.
+
+**Delayed Analytics:** Most hospitals rely on nightly or weekly batch exports to Excel or static report generators. By the time an analyst queries the data, it is already hours or days old. Real-time decisions — such as identifying which doctor has the most pending appointments, or which specialization is generating the most revenue today — are simply not possible with this model.
+
+**No Natural Language Interface:** Healthcare analysts and administrators are not always technical. Expecting them to write SQL queries or navigate complex BI dashboards creates a barrier to insight. There is a strong need for a system that allows users to ask questions in plain English and receive accurate, data-backed answers.
+
+**Lack of Infrastructure Visibility:** Modern cloud-native data platforms run dozens of services. Without a centralized monitoring view, operations teams cannot quickly determine which services are healthy, which have failed, and what the current state of data pipelines is.
+
+This project addresses all four problems by building a complete, production-realistic healthcare data platform from ground up.
+
+## 1.2 Motivation
+
+The motivation for this project is threefold:
+
+1. **Demonstrate Full-Stack Data Engineering:** Most portfolio projects cover one layer — either a Kafka producer, a Spark job, or a React dashboard. This project integrates every layer of the modern data stack into a single, cohesive system.
+
+2. **Real-World Deployment on AWS:** All components run on actual AWS EC2 instances using Docker Compose, not local machines or simulated environments. This demonstrates practical knowledge of cloud deployment, networking, and container orchestration.
+
+3. **AI-Augmented Analytics:** By integrating LangChain and a large language model (LLaMA 4 Scout via Groq), the platform demonstrates how AI can act as a data analyst — querying databases, checking pipeline health, and synthesizing insights in response to natural language questions.
+
+## 1.3 Document Scope
+
+This document provides comprehensive technical documentation for the Healthcare Data Platform project. It covers:
+
+- System architecture and design decisions
+- UML diagrams (use case, class, sequence, activity, deployment)
+- Complete functional and non-functional requirements
+- AWS infrastructure setup and step-by-step deployment guide
+- Database schema and data dictionary
+- Testing strategy and results
+- Full REST API documentation
+- Known bugs, their root causes, and the fixes applied
+- Future enhancement roadmap
+
+---
+
+# 2. Project Overview
+
+## 2.1 Objectives
+
+The Healthcare Data Platform is designed to achieve the following measurable objectives:
+
+| # | Objective | Metric |
+|---|---|---|
+| O-01 | Ingest healthcare events in real-time | 5 Kafka topics, 2-second event interval |
+| O-02 | Validate every event before persistence | 5 validators, invalid records logged separately |
+| O-03 | Persist operational data with idempotent upserts | MySQL, ON DUPLICATE KEY UPDATE pattern |
+| O-04 | Orchestrate daily batch analytics | Airflow DAG, schedule 02:00 UTC |
+| O-05 | Compute 15 KPI aggregation tables | 3 PySpark jobs, 7 + 4 + 4 tables |
+| O-06 | Provide an interactive analytics dashboard | 7 React pages, 7 FastAPI routers |
+| O-07 | Enable AI-powered natural language querying | LLaMA 4 + 7 live tools |
+| O-08 | Monitor infrastructure health in real-time | 10 service probes (HTTP + TCP) |
+
+## 2.2 Project Scope
+
+**In Scope:**
+- Real-time data ingestion using Apache Kafka (5 topics)
+- Stream processing and validation using Apache Flink (PyFlink)
+- Operational data storage in MySQL 8.0 (5 tables, port 3308)
+- Daily batch analytics orchestration using Apache Airflow 2.9.3
+- Batch computation using Apache Spark 3.5.0 (PySpark, 15 analytics tables)
+- REST API backend using FastAPI (7 routers)
+- Interactive frontend using React + Vite + Tailwind CSS (7 pages)
+- AI chat interface using LangChain + Groq (LLaMA 4 Scout, 7 tools)
+- Infrastructure health monitoring (10 services, HTTP + TCP probes)
+- Data entry via dashboard forms to Kafka
+- Full containerized deployment on AWS EC2 using Docker Compose
+
+**Out of Scope:**
+- User authentication and role-based authorization
+- Multi-region or multi-broker Kafka cluster
+- Data encryption at rest or in transit (TLS/SSL)
+- CI/CD pipeline (GitHub Actions, Jenkins, etc.)
+- External BI tools (Grafana, Metabase, Tableau)
+- Mobile application (iOS/Android)
+- Data archival or cold storage (S3, Glacier)
+- Alerting and on-call notifications (PagerDuty, SNS)
+
+## 2.3 Technology Stack
+
+| Category | Technology | Version | Purpose |
+|---|---|---|---|
+| Cloud | AWS EC2 | — | 2× m7i-flex.large instances, ap-south-1 |
+| Containerization | Docker + Docker Compose | Latest | All services containerized |
+| Messaging | Apache Kafka (Confluent) | 7.4.0 | Real-time event streaming, 5 topics |
+| Coordination | Apache Zookeeper | (bundled) | Kafka broker coordination |
+| Kafka UI | Provectus Kafka UI | Latest | Kafka topic monitoring at :8085 |
+| Stream Processing | Apache Flink (PyFlink) | 1.18 | Validate events, write to MySQL |
+| Operational DB | MySQL | 8.0 | 5 operational + 15 analytics tables |
+| Data Faker | Faker (Python) | — | Synthetic healthcare data generation |
+| Orchestration | Apache Airflow | 2.9.3 | DAG scheduling, LocalExecutor |
+| Airflow Meta DB | PostgreSQL | 15 | Airflow internal state |
+| Batch Processing | Apache Spark (PySpark) | 3.5.0 | Compute 15 analytics tables |
+| API Backend | FastAPI + Uvicorn | 0.111.0 | 7 REST routers, SSE support |
+| HTTP Client | httpx | 0.27.0 | Airflow + Flink REST calls |
+| Kafka Client | kafka-python | 2.0.2 | Data entry producer |
+| DB Client | pymysql | 1.1.0 | MySQL reads from FastAPI |
+| AI Framework | LangChain | 0.3.x | Tool-calling loop, message history |
+| AI Provider | Groq API | — | Free tier, 100K tokens/day |
+| AI Model | LLaMA 4 Scout 17B | — | Natural language → tool calls |
+| Frontend | React + Vite | 18 / 5.x | 7-page SPA dashboard |
+| CSS Framework | Tailwind CSS | 3.x | Utility-first styling |
+| Frontend Server | nginx | Alpine | Serves React build at :3000 |
+| Language | Python | 3.11 | All backend, Flink, Spark, Airflow |
+| Language | Node.js | 18 | React frontend build |
+
+## 2.4 Project Timeline
+
+| Phase | Activities | Duration |
+|---|---|---|
+| Phase 1 — Design | Architecture design, data model, schema design | Week 1 |
+| Phase 2 — EC21 Build | Kafka setup, Flink job, producer, MySQL schema | Week 2 |
+| Phase 3 — EC21 Deploy | AWS EC2 launch, Docker Compose deployment, testing | Week 3 |
+| Phase 4 — EC22 Build | Airflow DAG, Spark jobs, FastAPI routers, React pages | Week 4–5 |
+| Phase 5 — EC22 Deploy | AWS EC2 launch, full pipeline test, analytics verification | Week 6 |
+| Phase 6 — AI Chat | LangChain integration, 7 tools, SSE streaming, Chat page | Week 7 |
+| Phase 7 — Testing & Docs | End-to-end testing, bug fixes, documentation | Week 8 |
+
+---
+
+# 3. System Architecture
+
+## 3.1 High-Level Architecture
+
+The platform is split across two AWS EC2 instances in the ap-south-1 (Mumbai) region. This separation reflects real-world architectural separation of concerns — streaming infrastructure is isolated from analytics and user-facing services.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          AWS ap-south-1 (Mumbai)                             │
+│                                                                              │
+│  ┌──────────────────────────────┐     ┌────────────────────────────────────┐ │
+│  │  EC21 — 65.0.80.152          │     │  EC22 — 3.6.92.19                  │ │
+│  │  [Streaming Pipeline]        │     │  [Analytics + Dashboard + AI]      │ │
+│  │                              │     │                                    │ │
+│  │  Faker Producer              │     │  PostgreSQL (Airflow meta)         │ │
+│  │      ↓                       │     │  Airflow Webserver + Scheduler     │ │
+│  │  Kafka Broker (:9092)        │◄────│  Spark Master + Worker             │ │
+│  │      ↓           ↑           │     │      ↓ reads + writes via JDBC     │ │
+│  │  PyFlink      DataEntry      │     │  FastAPI Dashboard API (:8000)     │ │
+│  │      ↓        from EC22      │     │      ↓                            │ │
+│  │  MySQL (:3308)───────────────│────►│  React Dashboard UI (:3000)       │ │
+│  │  [5 operational tables]      │     │  [7 pages]                        │ │
+│  │  [15 analytics tables]       │     │                                    │ │
+│  └──────────────────────────────┘     └────────────────────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Cross-instance communication:**
+- EC22 → EC21 MySQL: JDBC connection to `65.0.80.152:3308` (Spark reads + writes, FastAPI reads)
+- EC22 → EC21 Kafka: `kafka-python` producer to `65.0.80.152:9092` (Data entry from dashboard)
+- EC22 → EC21 Flink UI: HTTP to `65.0.80.152:8081` (Infrastructure health probe, AI tool)
+- EC22 → EC21 Kafka UI: HTTP to `65.0.80.152:8085` (Kafka topic info AI tool)
+
+## 3.2 EC21 — Streaming Pipeline Architecture
+
+EC21 hosts the complete real-time data ingestion and processing stack. All 8 containers run on a single Docker bridge network named `healthcare-net`.
+
+**Container Dependency Graph:**
+```
+zookeeper (health: cub zk-ready)
+    └──► kafka (health: kafka-topics --list)
+              ├──► kafka-ui          [monitoring UI, :8085]
+              ├──► producer          [restart:no — runs once]
+              └──► flink-jobmanager  [health: curl :8081]
+                        ├──► flink-taskmanager
+                        └──► flink-job-submitter [restart:no]
+                                    ↓
+                              (submits healthcare_job.py)
+
+mysql (health: mysqladmin ping) ←── flink-job-submitter depends on it
+```
+
+**Startup sequence enforced by `depends_on` with `condition: service_healthy`:**
+1. Zookeeper starts and passes health check
+2. Kafka starts (requires healthy Zookeeper), passes health check
+3. MySQL starts independently, passes health check
+4. Flink JobManager starts (requires healthy Kafka + MySQL), passes health check
+5. Producer, Kafka UI, Flink TaskManager, Flink Job Submitter start
+
+**Key configuration values:**
+- Kafka internal listener: `kafka:29092` (container-to-container)
+- Kafka external listener: `65.0.80.152:9092` (host + remote access)
+- MySQL port: 3308 (non-default, avoids conflict with local MySQL installs)
+- Flink checkpoint interval: 10,000 ms
+- Flink parallelism: 1
+- Flink task slots: 1
+
+## 3.3 EC22 — Analytics & Dashboard Architecture
+
+EC22 hosts Airflow, Spark, FastAPI, and the React frontend. All 8 containers run on a Docker bridge network named `ec22-net`.
+
+**Container startup sequence:**
+1. PostgreSQL starts and passes health check
+2. Airflow Init runs DB migrations and creates admin user, then exits (`restart: no`)
+3. Airflow Webserver and Scheduler start (require healthy PostgreSQL + completed airflow-init)
+4. Spark Master starts independently, passes health check
+5. Spark Worker starts (requires healthy Spark Master)
+6. Dashboard API starts (requires healthy Airflow Webserver)
+7. Dashboard UI starts (requires dashboard-api)
+
+**Spark cluster configuration:**
+- 1 master + 1 worker
+- Worker: 2 cores, 2 GB memory
+- Spark jobs submitted via Airflow SparkSubmitOperator using `conn_id=spark_default`
+- spark_default connection: `spark://spark-master:7077`
+- MySQL JAR mounted at `/opt/spark/jars/mysql-connector-j.jar`
+
+## 3.4 End-to-End Data Flow
+
+The complete lifecycle of a data record, from generation to AI-queryable insight:
+
+**Step 1 — Generation (EC21):**
+The Faker-based producer generates synthetic healthcare records. It first sends a fixed set of 20 patients and 10 doctors, then enters a loop generating one appointment, one treatment, and one billing record every 2 seconds for 100 total events.
+
+**Step 2 — Kafka Ingestion (EC21):**
+Each record is serialized as JSON and published to the corresponding Kafka topic with the entity ID as the message key (e.g., `appointment_id` for the appointments topic). Kafka stores these messages durably on disk in `kafka-data` volume.
+
+**Step 3 — Flink Validation (EC21):**
+PyFlink consumes from all 5 Kafka topics using `KafkaSource.builder()`. For each message:
+- Parse JSON string to Python dict
+- Run entity-specific validator (e.g., `validate_appointment()`)
+- If valid: convert to typed Flink Row → emit to main output → JdbcSink
+- If invalid: emit to side output tagged `INVALID_TAG` → print to task logs
+
+**Step 4 — MySQL Persistence (EC21):**
+Valid records are batched (1,000ms or 100 rows) and written to MySQL via the JDBC sink using `ON DUPLICATE KEY UPDATE`. This ensures idempotent writes — if Flink replays a message from a checkpoint, the upsert prevents duplicate rows.
+
+**Step 5 — Airflow Orchestration (EC22):**
+At 02:00 UTC, the Airflow scheduler triggers `healthcare_analytics_pipeline`. The DAG verifies MySQL connectivity, initializes 15 analytical table schemas if not present, waits for Spark to be ready, then submits 3 Spark jobs in parallel.
+
+**Step 6 — Spark Analytics (EC22 → EC21):**
+Each PySpark job reads operational tables from EC21 MySQL via JDBC, computes aggregations using Spark DataFrame transformations and Window functions, and writes the results back to 15 `analytics_*` tables in the same EC21 MySQL database.
+
+**Step 7 — Dashboard Serving (EC22):**
+FastAPI exposes 7 REST routers. The financial, operational, and patient routers query the analytics tables directly (single-table SELECTs, sub-100ms). The pipeline router proxies Airflow REST API. The infrastructure router runs live TCP/HTTP probes. The chat router invokes the LangChain agent.
+
+**Step 8 — AI Querying (EC22 → multiple):**
+When a user types a question in the Chat page, FastAPI runs the LangChain manual tool-calling loop. The LLM (LLaMA 4 Scout via Groq) decides which tools to call, executes them against live systems, and returns a synthesized markdown response streamed back via SSE.
+
+## 3.5 Technology Selection Rationale
+
+| Decision | Chosen | Alternative Considered | Reason |
+|---|---|---|---|
+| Message broker | Apache Kafka | RabbitMQ, AWS SQS | Kafka is the industry standard for high-throughput streaming; durable log, replay support |
+| Stream processor | Apache Flink | Spark Structured Streaming | Flink is purpose-built for low-latency stateful stream processing; native PyFlink API |
+| Batch orchestrator | Apache Airflow | Apache Luigi, Prefect | Airflow has the richest ecosystem, best UI, and is the most widely used in production |
+| Batch compute | Apache Spark (PySpark) | Pandas, dbt | Spark scales horizontally; PySpark is familiar to Python data engineers |
+| API framework | FastAPI | Flask, Django REST | FastAPI is async-native, auto-generates OpenAPI docs, ideal for SSE |
+| AI model | LLaMA 4 Scout (Groq) | OpenAI GPT-4, Claude | Groq free tier (100K tokens/day) eliminates cost; LLaMA 4 supports tool calling |
+| AI framework | LangChain | LlamaIndex, raw API | LangChain provides tool binding, message history, and structured tool call handling |
+| Frontend | React + Vite + Tailwind | Vue.js, Angular | React ecosystem is largest; Vite provides fast HMR; Tailwind enables rapid UI development |
+
+---
+
+# 4. UML Diagrams
+
+## 4.1 Use Case Diagram
+
+**Actors:**
+- **Data Producer:** Automated system (Faker producer container) that generates healthcare events
+- **Dashboard User:** Hospital analyst or administrator using the React dashboard
+- **AI Agent:** LangChain + LLaMA model that acts as an intelligent analyst
+- **System Administrator:** DevOps/admin who manages the infrastructure
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Healthcare Data Platform               │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ Data Ingestion                                    │   │
+│  │   (UC-01) Generate synthetic healthcare events    │◄──┤ Data Producer
+│  │   (UC-02) Publish events to Kafka topics          │   │
+│  │   (UC-03) Validate events (5 entity validators)   │   │
+│  │   (UC-04) Persist valid records to MySQL          │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ Analytics & Dashboard                             │   │
+│  │   (UC-05) View financial analytics                │◄──┤ Dashboard User
+│  │   (UC-06) View operational analytics              │   │
+│  │   (UC-07) View patient analytics                  │   │
+│  │   (UC-08) Monitor pipeline status                 │   │
+│  │   (UC-09) Trigger analytics pipeline              │   │
+│  │   (UC-10) Enter new healthcare records            │   │
+│  │   (UC-11) Monitor infrastructure health           │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ AI Chat                                           │   │
+│  │   (UC-12) Ask natural language questions          │◄──┤ Dashboard User
+│  │   (UC-13) Query analytics database via AI         │   │
+│  │   (UC-14) Check pipeline + infra health via AI    │◄──┤ AI Agent
+│  │   (UC-15) Generate insights report                │   │
+│  │   (UC-16) Trigger pipeline via AI with confirm    │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │ Administration                                    │   │
+│  │   (UC-17) Deploy services via Docker Compose      │◄──┤ Sys Admin
+│  │   (UC-18) Configure Airflow connections           │   │
+│  │   (UC-19) Monitor container health               │   │
+│  │   (UC-20) Rotate API keys / credentials          │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+## 4.2 Class Diagram
+
+The core domain entities and their relationships:
+
+```mermaid
+classDiagram
+    class Patient {
+        +String patient_id
+        +String first_name
+        +String last_name
+        +String gender
+        +Date date_of_birth
+        +String contact_number
+        +String address
+        +Date registration_date
+        +String insurance_provider
+        +String insurance_number
+        +String email
+        +validate() bool
+    }
+
+    class Doctor {
+        +String doctor_id
+        +String first_name
+        +String last_name
+        +String specialization
+        +String phone_number
+        +int years_experience
+        +String hospital_branch
+        +String email
+        +validate() bool
+    }
+
+    class Appointment {
+        +String appointment_id
+        +String patient_id
+        +String doctor_id
+        +Date appointment_date
+        +Time appointment_time
+        +String reason_for_visit
+        +String status
+        +validate() bool
+    }
+
+    class Treatment {
+        +String treatment_id
+        +String appointment_id
+        +String treatment_type
+        +String description
+        +float cost
+        +Date treatment_date
+        +validate() bool
+    }
+
+    class Billing {
+        +String bill_id
+        +String patient_id
+        +String treatment_id
+        +Date bill_date
+        +float amount
+        +String payment_method
+        +String payment_status
+        +validate() bool
+    }
+
+    class KafkaProducer {
+        +String bootstrap_servers
+        +float send_interval
+        +int max_events
+        +wait_for_kafka()
+        +ensure_topics()
+        +gen_patient(pid) Patient
+        +gen_doctor(did) Doctor
+        +gen_appointment(aid, pid, did) Appointment
+        +gen_treatment(tid, aid, date) Treatment
+        +gen_billing(bid, pid, tid, date, amount) Billing
+        +main()
+    }
+
+    class ValidateAndConvert {
+        +String topic
+        +validator function
+        +converter function
+        +process_element(value, ctx)
+    }
+
+    class LangChainAgent {
+        +List tools
+        +ChatGroq llm
+        +String system_prompt
+        +run_agent(input, history) str
+    }
+
+    Patient "1" --> "many" Appointment : has
+    Doctor "1" --> "many" Appointment : conducts
+    Appointment "1" --> "1" Treatment : leads to
+    Treatment "1" --> "1" Billing : billed via
+    Patient "1" --> "many" Billing : pays
+    KafkaProducer --> Patient : generates
+    KafkaProducer --> Doctor : generates
+    KafkaProducer --> Appointment : generates
+    KafkaProducer --> Treatment : generates
+    KafkaProducer --> Billing : generates
+    ValidateAndConvert --> Patient : validates
+    ValidateAndConvert --> Doctor : validates
+    LangChainAgent --> Billing : queries via SQL tool
+```
+
+## 4.3 Sequence Diagram — Data Ingestion
+
+This diagram shows the complete flow from producer generating an event to MySQL persistence.
+
+```mermaid
+sequenceDiagram
+    participant P as Faker Producer
+    participant K as Kafka Broker
+    participant F as PyFlink Job
+    participant V as Validator
+    participant J as JDBC Sink
+    participant M as MySQL
+
+    P->>K: send("appointments", key=A0001, value=JSON)
+    P->>K: send("treatments", key=T0001, value=JSON)
+    P->>K: send("billing", key=B0001, value=JSON)
+    K-->>P: ack
+
+    F->>K: poll(topic="appointments", group=flink-healthcare-appointments)
+    K-->>F: raw JSON string
+
+    F->>V: validate_appointment(dict)
+    alt Valid record
+        V-->>F: (True, "")
+        F->>F: convert_appointment(dict) → Row
+        F->>J: emit Row to JdbcSink
+        J->>M: INSERT INTO appointments ... ON DUPLICATE KEY UPDATE
+        M-->>J: OK
+    else Invalid record
+        V-->>F: (False, "invalid status 'Unknown'")
+        F->>F: ctx.output(INVALID_TAG, error_json)
+        F->>F: log.warning("[INVALID][appointments] ...")
+    end
+
+    Note over F,M: Batch write: every 1000ms or 100 rows
+    Note over F: Checkpoint every 10s — replay-safe
+```
+
+## 4.4 Sequence Diagram — Batch Analytics Pipeline
+
+```mermaid
+sequenceDiagram
+    participant S as Airflow Scheduler
+    participant D as DAG Runner
+    participant M as MySQL (EC21)
+    participant SP as Spark Cluster
+    participant AT as Analytics Tables
+
+    S->>D: trigger DAG at 02:00 UTC
+    D->>M: check_mysql_connection() — SELECT COUNT(*) FROM patients
+    M-->>D: count = 20 (OK)
+    D->>M: init_analytical_schema() — CREATE TABLE IF NOT EXISTS (×15)
+    M-->>D: tables ready
+
+    D->>SP: SparkClusterSensor — GET /json/ (poll every 15s)
+    SP-->>D: workers=1 (ready)
+
+    par Parallel Spark Jobs
+        D->>SP: SparkSubmitOperator(financial_analytics.py)
+        SP->>M: read_table(appointments, treatments, billing, doctors)
+        M-->>SP: DataFrames
+        SP->>SP: aggregate 7 financial KPIs
+        SP->>AT: write_table(analytics_revenue_by_doctor) ×7
+    and
+        D->>SP: SparkSubmitOperator(operational_analytics.py)
+        SP->>M: read_table(appointments, doctors)
+        M-->>SP: DataFrames
+        SP->>SP: aggregate 4 operational KPIs
+        SP->>AT: write_table(analytics_appointment_status) ×4
+    and
+        D->>SP: SparkSubmitOperator(patient_analytics.py)
+        SP->>M: read_table(patients, appointments, billing)
+        M-->>SP: DataFrames
+        SP->>SP: aggregate 4 patient KPIs
+        SP->>AT: write_table(analytics_patient_spending) ×4
+    end
+
+    D->>D: pipeline_complete (EmptyOperator)
+    Note over AT: 15 analytics tables refreshed
+```
+
+## 4.5 Sequence Diagram — AI Chat
+
+```mermaid
+sequenceDiagram
+    participant U as User (Browser)
+    participant R as React Chat Page
+    participant A as FastAPI /api/chat/message
+    participant L as LangChain Agent
+    participant G as Groq API (LLaMA 4)
+    participant T as Tool (e.g., query_analytics_db)
+    participant M as MySQL / Airflow / Flink
+
+    U->>R: types question, presses Enter
+    R->>A: POST /api/chat/message {message, history, session_id}
+    A->>A: asyncio.create_task(run_agent())
+    A-->>R: StreamingResponse (text/event-stream)
+
+    loop Tool-Calling Loop (max 8 iterations)
+        L->>G: ainvoke([SystemMessage, ...history, HumanMessage])
+        G-->>L: AIMessage with tool_calls
+
+        alt tool_calls present
+            L->>T: tool.invoke(args)
+            T->>M: SELECT / HTTP probe / REST call
+            M-->>T: result data
+            T-->>L: str(result)
+            L->>L: append ToolMessage to messages
+            A-->>R: SSE event: {type:"tool_start", tool:"query_analytics_db"}
+            A-->>R: SSE event: {type:"tool_end"}
+        else no tool_calls
+            L->>L: return response.content
+        end
+    end
+
+    A-->>R: SSE event: {type:"token", text:"Dr. Jane Smith leads with ₹4,82,350..."}
+    A-->>R: SSE event: {type:"done"}
+    R->>R: update message bubble, stop cursor
+    R->>U: display markdown response
+```
+
+## 4.6 Activity Diagram — Flink Validation Pipeline
+
+```
+START
+  │
+  ▼
+Receive raw string from Kafka topic
+  │
+  ▼
+Parse JSON ──► [JSONDecodeError?] ──YES──► Output to INVALID_TAG
+  │                                              │
+  NO                                           END (invalid path)
+  │
+  ▼
+Select entity validator based on topic
+  │
+  ▼
+Run validator(data_dict)
+  │
+  ├── [patient_id missing?] ──YES──► return (False, "missing patient_id")
+  ├── [gender not in {M,F}?] ──YES──► return (False, "invalid gender")
+  ├── [date parse fails?] ──YES──► return (False, "invalid date_of_birth")
+  ├── [email regex fails?] ──YES──► return (False, "invalid email")
+  └── [all checks pass] ──────────► return (True, "")
+  │
+  ▼
+[valid == True?]
+  │
+  ├── YES ──► Convert dict to typed Flink Row
+  │                 │
+  │                 ▼
+  │           Emit to main output stream
+  │                 │
+  │                 ▼
+  │           JdbcSink batches row
+  │                 │
+  │                 ▼
+  │           [batch full or interval elapsed?]
+  │                 │
+  │                 YES ──► Execute INSERT ... ON DUPLICATE KEY UPDATE
+  │                               │
+  │                               ▼
+  │                         MySQL confirms write
+  │
+  └── NO ──► ctx.output(INVALID_TAG, error_json)
+                  │
+                  ▼
+             log.warning("[INVALID][topic] error_message")
+                  │
+                  ▼
+             Invalid record logged (not persisted)
+
+CHECKPOINT (every 10 seconds):
+  → Save Kafka consumer offsets + JDBC state
+  → On restart: replay from last checkpoint offset (idempotent via upsert)
+```
+
+## 4.7 Activity Diagram — Airflow DAG Execution
+
+```
+DAG TRIGGER (02:00 UTC daily OR manual trigger)
+  │
+  ▼
+[start] EmptyOperator
+  │
+  ▼
+[check_mysql_connection] PythonOperator
+  │
+  ├── FAIL (cannot connect) ──► Retry (2×, 5min delay) ──► DAG FAILED
+  │
+  └── SUCCESS: patients table row count logged
+  │
+  ▼
+[init_analytical_schema] PythonOperator
+  │ Reads analytical_schema.sql
+  │ Executes CREATE TABLE IF NOT EXISTS for 15 tables
+  ├── FAIL ──► Retry ──► DAG FAILED
+  └── SUCCESS
+  │
+  ▼
+[wait_for_spark_cluster] SparkClusterSensor
+  │ Polls GET http://spark-master:8080/json/ every 15 seconds
+  │ Checks: workers with state=ALIVE >= 1
+  ├── TIMEOUT (300s) ──► DAG FAILED
+  └── SUCCESS: Spark ready
+  │
+  ▼ (all 3 tasks start simultaneously)
+  ┌──────────────┬──────────────────────┬──────────────────┐
+  ▼              ▼                      ▼                  │
+[financial]  [operational]          [patient]              │
+SparkSubmit  SparkSubmit            SparkSubmit            │
+  │              │                      │                  │
+  ▼              ▼                      ▼                  │
+7 tables     4 tables               4 tables               │
+  └──────────────┴──────────────────────┘                  │
+                 │                                         │
+                 ▼                                         │
+        [pipeline_complete] EmptyOperator                  │
+                 │                                         │
+                 ▼                                         │
+              DAG SUCCESS ─────────────────────────────────┘
+```
+
+## 4.8 Deployment Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          AWS Cloud — ap-south-1                             │
+│                                                                             │
+│  ┌────────────────────────────────────────┐                                 │
+│  │  EC21 — m7i-flex.large                 │                                 │
+│  │  OS: Ubuntu 22.04 LTS                  │                                 │
+│  │  IP: 65.0.80.152                       │                                 │
+│  │  Storage: 30 GB gp3 EBS               │                                 │
+│  │                                        │                                 │
+│  │  ┌─────────────────────────────────┐  │                                 │
+│  │  │  Docker Engine                  │  │                                 │
+│  │  │  Network: healthcare-net        │  │                                 │
+│  │  │                                 │  │                                 │
+│  │  │  [zookeeper]  :2181             │  │                                 │
+│  │  │  [kafka]      :9092/:29092      │  │                                 │
+│  │  │  [kafka-ui]   :8085             │  │                                 │
+│  │  │  [mysql]      :3308             │  │                                 │
+│  │  │  [producer]   (internal only)   │  │                                 │
+│  │  │  [flink-jm]   :8081             │  │                                 │
+│  │  │  [flink-tm]   (internal only)   │  │                                 │
+│  │  │  [flink-sub]  (internal only)   │  │                                 │
+│  │  └─────────────────────────────────┘  │                                 │
+│  └────────────────────────────────────────┘                                 │
+│                    ▲ JDBC :3308                                             │
+│                    │ Kafka :9092                                            │
+│                    │ HTTP :8081, :8085                                      │
+│  ┌─────────────────┴──────────────────────┐                                 │
+│  │  EC22 — m7i-flex.large                 │                                 │
+│  │  OS: Ubuntu 22.04 LTS                  │                                 │
+│  │  IP: 3.6.92.19                         │                                 │
+│  │  Storage: 30 GB gp3 EBS               │                                 │
+│  │                                        │                                 │
+│  │  ┌─────────────────────────────────┐  │                                 │
+│  │  │  Docker Engine                  │  │                                 │
+│  │  │  Network: ec22-net              │  │                                 │
+│  │  │                                 │  │                                 │
+│  │  │  [postgres]        :5432        │  │                                 │
+│  │  │  [airflow-init]    (run once)   │  │                                 │
+│  │  │  [airflow-web]     :8080        │  │                                 │
+│  │  │  [airflow-sched]   (internal)   │  │                                 │
+│  │  │  [spark-master]    :9090/:7077  │  │                                 │
+│  │  │  [spark-worker]    :8082        │  │                                 │
+│  │  │  [dashboard-api]   :8000        │  │                                 │
+│  │  │  [dashboard-ui]    :3000        │  │                                 │
+│  │  └─────────────────────────────────┘  │                                 │
+│  └────────────────────────────────────────┘                                 │
+│                    ▲                                                        │
+│                    │ HTTP/SSE                                               │
+│  ┌─────────────────┴──────────────────────┐                                 │
+│  │  External — Internet                   │                                 │
+│  │  User Browser → 3.6.92.19:3000         │                                 │
+│  │  Groq API → api.groq.com               │                                 │
+│  └────────────────────────────────────────┘                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+# 5. Functional Requirements
+
+Functional requirements are organized by system layer. Each requirement is assigned a unique ID, priority (High / Medium / Low), and status.
+
+## 5.1 Data Ingestion Requirements
+
+| ID | Requirement | Priority | Notes |
+|---|---|---|---|
+| FR-01 | The system shall ingest healthcare events for 5 entity types: patients, doctors, appointments, treatments, and billing | High | Core functionality |
+| FR-02 | The Kafka producer shall automatically create all 5 topics if they do not exist | High | Uses KafkaAdminClient |
+| FR-03 | The producer shall send an initial batch of 20 patients and 10 doctors before starting the event loop | High | Ensures FK references exist before appointment events |
+| FR-04 | The producer shall generate events at a configurable interval (default: 2 seconds) | Medium | `SEND_INTERVAL` env var |
+| FR-05 | The producer shall stop after a configurable number of events (default: 100) | Medium | `MAX_EVENTS` env var; 0 = unlimited |
+| FR-06 | All Kafka messages shall use the entity primary key as the message key | High | Enables correct log compaction and partitioning |
+| FR-07 | All Kafka messages shall be JSON-serialized and UTF-8 encoded | High | Standard format for downstream consumption |
+| FR-08 | The producer shall wait up to 75 seconds for Kafka to become available before failing | Medium | 15 retries × 5s delay |
+
+## 5.2 Stream Processing Requirements
+
+| ID | Requirement | Priority | Notes |
+|---|---|---|---|
+| FR-09 | The Flink job shall consume all 5 Kafka topics from earliest offset | High | Replays all history on restart |
+| FR-10 | The system shall validate every incoming event against entity-specific business rules | High | 5 separate validator functions |
+| FR-11 | Invalid records shall be emitted to a named side output tag and logged | High | Not silently dropped |
+| FR-12 | Valid records shall be upserted to MySQL using INSERT ... ON DUPLICATE KEY UPDATE | High | Idempotent writes |
+| FR-13 | The Flink job shall enable checkpointing every 10 seconds | High | Recovery + at-least-once delivery |
+| FR-14 | Patient validation shall enforce gender ∈ {M, F} and valid date formats | High | Data quality |
+| FR-15 | Doctor validation shall enforce years_experience in range 0–60 | Medium | Data quality |
+| FR-16 | Appointment validation shall enforce status ∈ {Scheduled, Completed, Cancelled, No-show} | High | Domain constraint |
+| FR-17 | Treatment validation shall enforce cost > 0 | High | Financial integrity |
+| FR-18 | Billing validation shall enforce valid payment_method and payment_status values | High | Financial integrity |
+| FR-19 | The JDBC sink shall batch writes at 1,000ms intervals with a batch size of 100 rows | Medium | Performance optimization |
+| FR-20 | The JDBC sink shall retry failed writes up to 3 times | Medium | Fault tolerance |
+
+## 5.3 Batch Analytics Requirements
+
+| ID | Requirement | Priority | Notes |
+|---|---|---|---|
+| FR-21 | The Airflow DAG shall run daily at 02:00 UTC | High | Configured via cron: `0 2 * * *` |
+| FR-22 | The DAG shall verify MySQL connectivity and data presence before proceeding | High | `check_mysql_connection` task |
+| FR-23 | The DAG shall idempotently create all 15 analytical table schemas on every run | High | `CREATE TABLE IF NOT EXISTS` |
+| FR-24 | The DAG shall verify Spark cluster has at least 1 active worker before submitting jobs | High | `SparkClusterSensor`, timeout 300s |
+| FR-25 | The financial, operational, and patient Spark jobs shall execute in parallel | High | Airflow fan-out pattern |
+| FR-26 | The financial Spark job shall compute 7 analytics tables | High | Revenue, billing, payment, cost |
+| FR-27 | The operational Spark job shall compute 4 analytics tables | High | Status, workload, peak hours, scorecard |
+| FR-28 | The patient Spark job shall compute 4 analytics tables | High | Spending, age groups, retention, trend |
+| FR-29 | All Spark write operations shall truncate the target table before writing | High | Ensures fresh data, no accumulation |
+| FR-30 | The DAG shall retry failed tasks 2 times with a 5-minute delay | Medium | Fault tolerance |
+
+## 5.4 Dashboard & AI Requirements
+
+| ID | Requirement | Priority | Notes |
+|---|---|---|---|
+| FR-31 | The backend shall expose 7 REST API routers with a shared `/api` prefix | High | FastAPI |
+| FR-32 | The dashboard shall provide a Financial analytics page with revenue KPIs and charts | High | analytics_revenue_* tables |
+| FR-33 | The dashboard shall provide an Operational analytics page with appointment and workload data | High | analytics_appointment_* tables |
+| FR-34 | The dashboard shall provide a Patients analytics page with demographics and spending | High | analytics_patient_* tables |
+| FR-35 | The dashboard shall provide a Pipeline page showing DAG status and allowing manual trigger | High | Airflow REST API |
+| FR-36 | The dashboard shall provide a Data Entry page for submitting records to Kafka | High | kafka-python producer |
+| FR-37 | The dashboard shall provide an Infrastructure page showing real-time health of 10 services | High | TCP + HTTP probes |
+| FR-38 | The dashboard shall provide an AI Chat page for natural language querying | High | LangChain + Groq |
+| FR-39 | The AI agent shall have access to 7 tools covering database, pipeline, infra, Kafka, and Flink | High | Tool-calling loop |
+| FR-40 | The AI chat shall stream responses to the browser via Server-Sent Events (SSE) | High | asyncio.Queue + StreamingResponse |
+| FR-41 | The AI agent shall reject any SQL that is not a SELECT statement | High | Security constraint |
+| FR-42 | The `/api/chat/insights` endpoint shall generate a full analytics report on demand | Medium | Fixed prompt |
+| FR-43 | The CORS policy shall allow requests from all origins | Medium | Development convenience |
+
+---
+
+# 6. Non-Functional Requirements
+
+## 6.1 Performance
+
+| ID | Requirement | Target | Measurement |
+|---|---|---|---|
+| NFR-01 | Kafka message lag under normal producer load | < 500 ms | Kafka UI consumer lag metric |
+| NFR-02 | Flink-to-MySQL upsert latency (from message receipt to DB write) | < 2 seconds | Flink task metrics |
+| NFR-03 | All 3 Spark analytics jobs complete within acceptable window | < 10 minutes total | Airflow task duration |
+| NFR-04 | Dashboard API response time for analytics reads | < 500 ms | FastAPI response headers |
+| NFR-05 | Infrastructure health check total response time | < 5 seconds | All 10 probes complete |
+| NFR-06 | AI chat response generation (simple question, 1 tool) | < 8 seconds | Browser network tab |
+| NFR-07 | React dashboard initial page load | < 2 seconds | Browser performance tab |
+
+## 6.2 Reliability & Availability
+
+| ID | Requirement | Implementation |
+|---|---|---|
+| NFR-08 | Core services shall restart automatically on failure | `restart: unless-stopped` on Kafka, MySQL, Flink, Airflow, Spark, dashboard containers |
+| NFR-09 | Producer and job-submitter shall execute exactly once | `restart: no` — prevents duplicate data generation or job submission on container restart |
+| NFR-10 | Health checks shall be defined for all critical containers | `healthcheck` blocks with `interval`, `timeout`, `retries`, `start_period` |
+| NFR-11 | Service startup order shall be enforced | `depends_on` with `condition: service_healthy` |
+| NFR-12 | Airflow DAG shall automatically retry failed tasks | `retries: 2`, `retry_delay: timedelta(minutes=5)` |
+| NFR-13 | Flink shall recover from failures using checkpoints | Checkpointing every 10 seconds, reads Kafka from last saved offset |
+| NFR-14 | MySQL data shall persist across container restarts | `mysql-data` named Docker volume |
+| NFR-15 | Airflow metadata shall persist across container restarts | `postgres-data` named Docker volume |
+
+## 6.3 Scalability
+
+| ID | Requirement | Approach |
+|---|---|---|
+| NFR-16 | Kafka shall support increased message throughput | Add partitions to existing topics; add brokers via additional Confluent Kafka containers |
+| NFR-17 | Flink processing shall scale with workload | Increase `taskmanager.numberOfTaskSlots` and add task manager containers |
+| NFR-18 | Spark compute shall scale horizontally | Add `spark-worker` service replicas via `docker compose scale spark-worker=N` |
+| NFR-19 | FastAPI shall handle concurrent requests | Uvicorn async workers; stateless design enables multiple instances behind a load balancer |
+| NFR-20 | Analytics jobs shall be independently deployable | Each Spark job is a standalone Python file with its own `main()` |
+
+## 6.4 Security
+
+| ID | Requirement | Implementation |
+|---|---|---|
+| NFR-21 | All credentials shall be stored in `.env` files, not in source code | `os.getenv()` used throughout; no hardcoded passwords |
+| NFR-22 | `.env` files shall be excluded from version control | `.env` in `.gitignore`; `.env.example` provided with placeholder values |
+| NFR-23 | AI SQL tool shall only permit SELECT statements | `query_analytics_db` validates: `if not sql.strip().upper().startswith("SELECT")` |
+| NFR-24 | Groq API key shall be injected at runtime via environment variable | `GROQ_API_KEY` in `.env`, passed to `dashboard-api` container via `docker-compose.yml` |
+| NFR-25 | MySQL root password shall be configurable via environment variable | `MYSQL_ROOT_PASSWORD` env var; default is a placeholder in `.env.example` |
+| NFR-26 | SSH key (PEM file) shall not be stored on NTFS mounts without permission fix | Copy to `/dev/shm/` and `chmod 400` before SSH use |
+
+## 6.5 Maintainability
+
+| ID | Requirement | Implementation |
+|---|---|---|
+| NFR-27 | Each Spark job shall be independently executable | Standalone `main()` entry point; can be run with `spark-submit` directly |
+| NFR-28 | Shared Spark utilities shall be extracted to a common module | `utils.py` — `build_spark_session`, `read_table`, `write_table` |
+| NFR-29 | Flink validation logic shall be testable in isolation | Validator functions are pure Python, accept dict, return (bool, str) |
+| NFR-30 | FastAPI routers shall be organized by domain | Separate router files: financial.py, operational.py, patients.py, pipeline.py, etc. |
+| NFR-31 | Docker Compose files shall use environment variable substitution | All configurable values referenced as `${VAR_NAME}` |
+| NFR-32 | Airflow DAG configuration shall use YAML anchors to avoid duplication | `x-airflow-common` anchor shared by all Airflow containers |
+
+---
+
+# 7. AWS Setup & Execution
+
+## 7.1 AWS Account & EC2 Provisioning
+
+**Prerequisites:**
+- AWS account with EC2 and VPC access
+- AWS CLI configured (optional, for scripted setup)
+- SSH key pair downloaded as `serversfinal.pem`
+
+**Launch EC21 (Streaming Pipeline):**
+1. Go to EC2 → Launch Instance
+2. Name: `ec21-streaming-pipeline`
+3. AMI: Ubuntu Server 22.04 LTS (64-bit x86)
+4. Instance type: `m7i-flex.large` (2 vCPU, 8 GB RAM) — or `t3.large` as a cost-effective alternative
+5. Key pair: Select or create `serversfinal`
+6. Network: Default VPC, auto-assign public IP enabled
+7. Storage: 30 GB gp3 (increase to 50 GB if running extended tests)
+8. Security group: Create `ec21-sg` (see Section 7.2)
+9. Launch
+
+**Launch EC22 (Analytics + Dashboard):**
+1. Repeat steps above with name `ec22-analytics-dashboard`
+2. Security group: Create `ec22-sg` (see Section 7.2)
+3. Note down both public IPs: EC21 (`65.0.80.152`), EC22 (`3.6.92.19`)
+
+## 7.2 Security Group Configuration
+
+**EC21 Security Group (`ec21-sg`) — Inbound Rules:**
+
+| Port | Protocol | Source | Service | Notes |
+|---|---|---|---|---|
+| 22 | TCP | Your IP/32 | SSH | Admin access only |
+| 9092 | TCP | 0.0.0.0/0 | Kafka external | EC22 data entry + AI tool |
+| 3308 | TCP | ec22-sg (SG ID) | MySQL | EC22 Spark + FastAPI reads |
+| 8081 | TCP | 0.0.0.0/0 | Flink UI | Monitoring + AI tool |
+| 8085 | TCP | 0.0.0.0/0 | Kafka UI | Monitoring + AI tool |
+| 2181 | TCP | ec21-sg (SG ID) | Zookeeper | Internal Kafka coordination |
+
+**EC22 Security Group (`ec22-sg`) — Inbound Rules:**
+
+| Port | Protocol | Source | Service | Notes |
+|---|---|---|---|---|
+| 22 | TCP | Your IP/32 | SSH | Admin access only |
+| 8080 | TCP | 0.0.0.0/0 | Airflow Webserver | DAG management UI |
+| 9090 | TCP | 0.0.0.0/0 | Spark Master UI | Spark job monitoring |
+| 8082 | TCP | 0.0.0.0/0 | Spark Worker UI | Worker monitoring |
+| 7077 | TCP | ec22-sg (SG ID) | Spark Submit | Internal Airflow → Spark |
+| 5432 | TCP | ec22-sg (SG ID) | PostgreSQL | Internal Airflow metadata |
+| 8000 | TCP | 0.0.0.0/0 | FastAPI | Dashboard backend |
+| 3000 | TCP | 0.0.0.0/0 | React UI | Dashboard frontend |
+
+## 7.3 EC21 Deployment Steps
+
+```bash
+# Step 1: Copy PEM to writable location (NTFS workaround)
+cp /mnt/e/Docker/serversfinal.pem /dev/shm/serversfinal.pem
+chmod 400 /dev/shm/serversfinal.pem
+
+# Step 2: SSH into EC21
+ssh -i /dev/shm/serversfinal.pem ubuntu@65.0.80.152
+
+# Step 3: Install Docker and Docker Compose
+sudo apt update && sudo apt install -y docker.io
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo usermod -aG docker ubuntu
+newgrp docker
+
+# Step 4: Clone or upload project files
+# Option A: git clone
+git clone <your-repo-url> /home/ubuntu/docker
+cd /home/ubuntu/docker/EC21
+
+# Option B: scp from local machine
+# scp -i /dev/shm/serversfinal.pem -r /mnt/e/Docker/EC21 ubuntu@65.0.80.152:~/docker/EC21
+
+# Step 5: Configure environment
+cp .env.example .env
+nano .env
+# Fill in:
+#   MYSQL_ROOT_PASSWORD=<strong_password>
+#   MYSQL_CONTAINER_PORT=3306
+#   MYSQL_USER=root
+#   MYSQL_PASSWORD=<strong_password>
+#   MYSQL_DATABASE=healthcare
+#   SEND_INTERVAL=2.0
+#   MAX_EVENTS=100
+#   FLINK_UI_PORT=8081
+
+# Step 6: Start all services
+docker compose up -d
+
+# Step 7: Monitor startup
+docker compose logs -f kafka            # wait for "started (kafka.server.KafkaServer)"
+docker compose logs -f flink-jobmanager # wait for "Recovered all jobs"
+docker compose logs -f flink-job-submitter # watch job submission
+docker compose logs -f producer         # watch event generation
+
+# Step 8: Verify
+# Kafka UI: http://65.0.80.152:8085
+# Flink UI: http://65.0.80.152:8081
+# Check MySQL: docker exec -it mysql mysql -uroot -p<password> healthcare -e "SELECT COUNT(*) FROM patients;"
+```
+
+**Expected state after EC21 deployment:**
+- Kafka: 5 topics created, messages visible in Kafka UI
+- Flink: `Healthcare DataStream Pipeline` job in RUNNING state
+- MySQL: 20 patients, 10 doctors, 100 appointments, 100 treatments, 100 billing rows
+
+## 7.4 EC22 Deployment Steps
+
+```bash
+# Step 1: SSH into EC22
+ssh -i /dev/shm/serversfinal.pem ubuntu@3.6.92.19
+
+# Step 2: Install Docker (same as EC21)
+sudo apt update && sudo apt install -y docker.io
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo usermod -aG docker ubuntu && newgrp docker
+
+# Step 3: Upload project files
+# scp -i /dev/shm/serversfinal.pem -r /mnt/e/Docker/EC22 ubuntu@3.6.92.19:~/docker/EC22
+cd /home/ubuntu/docker/EC22
+
+# Step 4: Generate Airflow Fernet key
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Copy the output
+
+# Step 5: Configure environment
+cp .env.example .env
+nano .env
+# Fill in:
+#   POSTGRES_PASSWORD=<strong_password>
+#   AIRFLOW_FERNET_KEY=<generated_fernet_key>
+#   _AIRFLOW_WWW_USER_PASSWORD=<airflow_admin_password>
+#   MYSQL_HOST=65.0.80.152        ← EC21 public IP
+#   MYSQL_PORT=3308
+#   MYSQL_USER=root
+#   MYSQL_PASSWORD=<same_as_ec21>
+#   MYSQL_DATABASE=healthcare
+#   KAFKA_BOOTSTRAP_SERVERS=65.0.80.152:9092
+#   GROQ_API_KEY=gsk_<your_groq_key>
+#   AIRFLOW_UID=50000
+
+# Step 6: Start all services
+docker compose up -d
+
+# Step 7: Wait for Airflow init to complete
+docker compose logs -f airflow-init
+# Wait for: "Admin user admin created"
+
+# Step 8: Configure Airflow Spark connection
+# Open Airflow UI: http://3.6.92.19:8080
+# Login: admin / <your_password>
+# Admin → Connections → Add Connection:
+#   Connection ID: spark_default
+#   Connection Type: Spark
+#   Host: spark://spark-master
+#   Port: 7077
+# Save
+
+# Step 9: Enable and trigger DAG
+# In Airflow UI → DAGs → healthcare_analytics_pipeline
+# Toggle to enable (unpause)
+# Click ▶ (Trigger DAG) for first manual run
+
+# Step 10: Verify
+# Airflow UI:  http://3.6.92.19:8080
+# Spark UI:    http://3.6.92.19:9090
+# Dashboard:   http://3.6.92.19:3000
+# FastAPI:     http://3.6.92.19:8000/docs
+```
+
+## 7.5 Verification & Execution Guide
+
+**Service verification checklist:**
+
+| Service | URL / Command | Expected Result |
+|---|---|---|
+| EC21 Kafka UI | `http://65.0.80.152:8085` | Shows 5 topics with message counts |
+| EC21 Flink UI | `http://65.0.80.152:8081` | Healthcare job in RUNNING state |
+| EC21 MySQL | `docker exec -it mysql mysql -uroot -p<pw> -e "SELECT COUNT(*) FROM healthcare.patients;"` | Returns 20 |
+| EC22 Airflow | `http://3.6.92.19:8080` | DAG visible, green on last run |
+| EC22 Spark | `http://3.6.92.19:9090` | 1 master, 1 worker alive |
+| EC22 Dashboard | `http://3.6.92.19:3000` | Financial page loads with charts |
+| EC22 FastAPI | `http://3.6.92.19:8000/health` | `{"status": "ok"}` |
+| EC22 AI Chat | Type "How many patients?" in Chat page | AI responds with count from MySQL |
+
+**Troubleshooting common issues:**
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| Kafka container exits immediately | Zookeeper not healthy yet | Check Zookeeper logs: `docker compose logs zookeeper` |
+| Flink job not RUNNING | MySQL not reachable from Flink | Verify MySQL health check passed; check port 3308 |
+| Airflow DAG fails at check_mysql | EC21 MySQL port 3308 blocked | Add inbound rule for EC22 SG on port 3308 in EC21 SG |
+| Spark job fails at JDBC read | Wrong EC21 IP in `.env` | Update `MYSQL_HOST` in EC22 `.env` |
+| AI chat returns "Error" | GROQ_API_KEY missing or expired | Set valid key in EC22 `.env`, restart dashboard-api |
+| Dashboard shows no data | Spark analytics never ran | Manually trigger DAG in Airflow UI |
+
+---
+
+# 8. Data Model
+
+## 8.1 Operational Schema — ERD
+
+The operational schema consists of 5 tables in the `healthcare` MySQL database, representing the core entities of a hospital management system.
+
+```mermaid
+erDiagram
+    PATIENTS {
+        VARCHAR patient_id PK
+        VARCHAR first_name
+        VARCHAR last_name
+        CHAR gender
+        DATE date_of_birth
+        VARCHAR contact_number
+        TEXT address
+        DATE registration_date
+        VARCHAR insurance_provider
+        VARCHAR insurance_number
+        VARCHAR email
+    }
+
+    DOCTORS {
+        VARCHAR doctor_id PK
+        VARCHAR first_name
+        VARCHAR last_name
+        VARCHAR specialization
+        VARCHAR phone_number
+        INT years_experience
+        VARCHAR hospital_branch
+        VARCHAR email
+    }
+
+    APPOINTMENTS {
+        VARCHAR appointment_id PK
+        VARCHAR patient_id FK
+        VARCHAR doctor_id FK
+        DATE appointment_date
+        TIME appointment_time
+        VARCHAR reason_for_visit
+        VARCHAR status
+    }
+
+    TREATMENTS {
+        VARCHAR treatment_id PK
+        VARCHAR appointment_id FK
+        VARCHAR treatment_type
+        TEXT description
+        DECIMAL cost
+        DATE treatment_date
+    }
+
+    BILLING {
+        VARCHAR bill_id PK
+        VARCHAR patient_id FK
+        VARCHAR treatment_id FK
+        DATE bill_date
+        DECIMAL amount
+        VARCHAR payment_method
+        VARCHAR payment_status
+    }
+
+    PATIENTS ||--o{ APPOINTMENTS : "has"
+    DOCTORS ||--o{ APPOINTMENTS : "conducts"
+    APPOINTMENTS ||--|| TREATMENTS : "leads to"
+    TREATMENTS ||--|| BILLING : "billed as"
+    PATIENTS ||--o{ BILLING : "pays"
+```
+
+## 8.2 Analytical Tables Reference
+
+All 15 analytics tables are written by Spark jobs and read by the FastAPI dashboard. They are prefixed with `analytics_` for easy identification.
+
+**Financial Analytics (7 tables — `financial_analytics.py`):**
+
+| Table | Dimensions | Key Columns |
+|---|---|---|
+| `analytics_revenue_by_doctor` | doctor_id | full_name, specialization, hospital_branch, total_bills, total_revenue, avg_bill_amount, max_bill_amount |
+| `analytics_revenue_by_specialization` | specialization | doctor_count, total_appointments, total_revenue, avg_revenue_per_appt, avg_revenue_per_doc |
+| `analytics_revenue_by_branch` | hospital_branch | doctor_count, total_appointments, total_revenue, avg_revenue_per_appt |
+| `analytics_billing_payment` | payment_method, payment_status | bill_count, total_amount, avg_amount, pct_of_total_revenue |
+| `analytics_outstanding_payments` | payment_status | bill_count, total_outstanding, avg_outstanding, oldest_bill_date |
+| `analytics_monthly_revenue` | year, month | bill_count, total_revenue, avg_revenue, mom_growth_pct |
+| `analytics_treatment_cost` | treatment_type | treatment_count, avg_cost, min_cost, max_cost, total_cost |
+
+**Operational Analytics (4 tables — `operational_analytics.py`):**
+
+| Table | Dimensions | Key Columns |
+|---|---|---|
+| `analytics_appointment_status` | status | appointment_count, percentage |
+| `analytics_doctor_workload` | doctor_id | full_name, total_appointments, unique_patients, avg_cost |
+| `analytics_peak_hours` | hour_of_day | appointment_count |
+| `analytics_top_doctors_scorecard` | doctor_id | full_name, specialization, total_revenue, total_appointments, completion_rate, overall_score |
+
+**Patient Analytics (4 tables — `patient_analytics.py`):**
+
+| Table | Dimensions | Key Columns |
+|---|---|---|
+| `analytics_patient_spending` | patient_id | full_name, total_spend, avg_spend, max_spend, visit_count |
+| `analytics_patient_age_groups` | age_group | patient_count, percentage |
+| `analytics_patient_retention` | — (aggregate) | total_patients, returning_patients, retention_rate, avg_visits |
+| `analytics_new_patient_trend` | year, month | new_registrations |
+
+## 8.3 Data Dictionary
+
+### PATIENTS Table
+
+| Column | Type | Nullable | Constraints | Description |
+|---|---|---|---|---|
+| patient_id | VARCHAR(10) | NO | PRIMARY KEY | Format: P001–P999 |
+| first_name | VARCHAR(50) | NO | NOT NULL | Patient first name |
+| last_name | VARCHAR(50) | NO | NOT NULL | Patient last name |
+| gender | CHAR(1) | NO | CHECK (M or F) | M = Male, F = Female |
+| date_of_birth | DATE | YES | — | Range: 1950–2000 in test data |
+| contact_number | VARCHAR(15) | YES | — | 10-digit numeric string |
+| address | TEXT | YES | — | Street address |
+| registration_date | DATE | YES | — | Date first registered at hospital |
+| insurance_provider | VARCHAR(50) | YES | — | One of 5 configured providers |
+| insurance_number | VARCHAR(20) | YES | — | Format: INS + 6 digits |
+| email | VARCHAR(100) | YES | — | Validated by regex |
+
+### DOCTORS Table
+
+| Column | Type | Nullable | Constraints | Description |
+|---|---|---|---|---|
+| doctor_id | VARCHAR(10) | NO | PRIMARY KEY | Format: D001–D999 |
+| first_name | VARCHAR(50) | NO | NOT NULL | Doctor first name |
+| last_name | VARCHAR(50) | NO | NOT NULL | Doctor last name |
+| specialization | VARCHAR(50) | NO | NOT NULL | One of 8 specializations |
+| phone_number | VARCHAR(15) | YES | — | 10-digit numeric string |
+| years_experience | INT | YES | 0–60 | Validated by Flink |
+| hospital_branch | VARCHAR(50) | YES | — | One of 5 branches |
+| email | VARCHAR(100) | YES | — | Format: dr.name@hospital.com |
+
+### APPOINTMENTS Table
+
+| Column | Type | Nullable | Constraints | Description |
+|---|---|---|---|---|
+| appointment_id | VARCHAR(10) | NO | PRIMARY KEY | Format: A0001–A9999 |
+| patient_id | VARCHAR(10) | NO | FK → patients | Must reference existing patient |
+| doctor_id | VARCHAR(10) | NO | FK → doctors | Must reference existing doctor |
+| appointment_date | DATE | NO | NOT NULL | Range: 2023–2024 in test data |
+| appointment_time | TIME | NO | NOT NULL | One of 8 clinic slots |
+| reason_for_visit | VARCHAR(100) | YES | — | Free text, one of 4 standard reasons |
+| status | VARCHAR(20) | NO | Enum values | Scheduled, Completed, Cancelled, No-show |
+
+### TREATMENTS Table
+
+| Column | Type | Nullable | Constraints | Description |
+|---|---|---|---|---|
+| treatment_id | VARCHAR(10) | NO | PRIMARY KEY | Format: T0001–T9999 |
+| appointment_id | VARCHAR(10) | NO | FK → appointments | Links to appointment |
+| treatment_type | VARCHAR(50) | NO | NOT NULL | One of 8 treatment types |
+| description | TEXT | YES | — | One of 5 standard descriptions |
+| cost | DECIMAL(10,2) | NO | > 0 | Range: ₹500–₹8,000 |
+| treatment_date | DATE | NO | NOT NULL | Same as appointment_date |
+
+### BILLING Table
+
+| Column | Type | Nullable | Constraints | Description |
+|---|---|---|---|---|
+| bill_id | VARCHAR(10) | NO | PRIMARY KEY | Format: B0001–B9999 |
+| patient_id | VARCHAR(10) | NO | FK → patients | Links to patient |
+| treatment_id | VARCHAR(10) | NO | FK → treatments | Links to treatment |
+| bill_date | DATE | NO | NOT NULL | Same as treatment_date |
+| amount | DECIMAL(10,2) | NO | > 0 | Same as treatment cost |
+| payment_method | VARCHAR(20) | NO | Enum values | Cash, Insurance, Card |
+| payment_status | VARCHAR(20) | NO | Enum values | Paid, Pending, Failed |
+
+---
+
+# 9. Testing
+
+## 9.1 Testing Strategy
+
+The platform uses a four-level testing approach, covering everything from individual validation functions to the complete end-to-end pipeline.
+
+| Level | Scope | Tools | Automation |
+|---|---|---|---|
+| Unit | Flink validator functions | Python (manual test calls or pytest) | Partially automated |
+| Integration | Producer → Kafka → Flink → MySQL | Docker Compose + manual verification | Manual |
+| System | Full EC21 → EC22 pipeline | Live AWS deployment | Manual |
+| Manual | Dashboard UI, AI chat | Browser testing | Manual |
+
+## 9.2 Unit Tests — Flink Validators
+
+Each validator is a pure Python function that accepts a dict and returns `(bool, str)`. This makes them trivially testable without any Flink infrastructure.
+
+**Test cases for `validate_patient()`:**
+
+| Test Case | Input | Expected Result |
+|---|---|---|
+| Valid patient | All fields correct | `(True, "")` |
+| Missing patient_id | `{}` | `(False, "missing patient_id")` |
+| Missing first_name | No first_name key | `(False, "missing first_name")` |
+| Invalid gender — 'X' | `gender="X"` | `(False, "invalid gender 'X' — must be M or F")` |
+| Invalid gender — lowercase | `gender="m"` | `(False, "invalid gender 'm' — must be M or F")` |
+| Invalid DOB format | `date_of_birth="15-01-1990"` | `(False, "invalid date_of_birth '15-01-1990'")` |
+| Invalid registration date | `registration_date="not-a-date"` | `(False, "invalid registration_date 'not-a-date'")` |
+| Invalid email format | `email="notanemail"` | `(False, "invalid email 'notanemail'")` |
+| Empty email (allowed) | `email=""` | `(True, "")` — email is optional |
+
+**Test cases for `validate_appointment()`:**
+
+| Test Case | Input | Expected Result |
+|---|---|---|
+| Valid appointment | All fields correct | `(True, "")` |
+| Invalid status | `status="Completed_Early"` | `(False, "invalid status...")` |
+| Invalid time format | `appointment_time="10:00"` (no seconds) | `(False, "invalid appointment_time '10:00'")` |
+| Missing patient_id | No patient_id | `(False, "missing patient_id")` |
+
+**Test cases for `validate_treatment()`:**
+
+| Test Case | Input | Expected Result |
+|---|---|---|
+| Valid treatment | `cost=1500.0` | `(True, "")` |
+| Zero cost | `cost=0` | `(False, "cost must be > 0, got 0")` |
+| Negative cost | `cost=-500` | `(False, "cost must be > 0, got -500")` |
+| Non-numeric cost | `cost="free"` | `(False, "invalid cost 'free'")` |
+
+**Test cases for `validate_billing()`:**
+
+| Test Case | Input | Expected Result |
+|---|---|---|
+| Valid billing | All correct | `(True, "")` |
+| Invalid payment_method | `payment_method="Cheque"` | `(False, "invalid payment_method 'Cheque'")` |
+| Invalid payment_status | `payment_status="Disputed"` | `(False, "invalid payment_status 'Disputed'")` |
+| Zero amount | `amount=0` | `(False, "amount must be > 0, got 0")` |
+
+## 9.3 Integration Tests
+
+**Test 1 — Kafka topic creation:**
+1. Start EC21 with `docker compose up -d`
+2. Wait for producer to exit
+3. Open Kafka UI at `http://65.0.80.152:8085`
+4. Verify: 5 topics exist (`patients`, `doctors`, `appointments`, `treatments`, `billing`)
+5. Verify: `patients` topic has 20 messages, `doctors` has 10, others have 100 each
+
+**Test 2 — Flink → MySQL pipeline:**
+1. After producer exits, wait 30 seconds for Flink to process all messages
+2. Connect to MySQL: `docker exec -it mysql mysql -uroot -p<pw> healthcare`
+3. Run queries:
+```sql
+SELECT COUNT(*) FROM patients;      -- Expected: 20
+SELECT COUNT(*) FROM doctors;       -- Expected: 10
+SELECT COUNT(*) FROM appointments;  -- Expected: 100
+SELECT COUNT(*) FROM treatments;    -- Expected: 100
+SELECT COUNT(*) FROM billing;       -- Expected: 100
+```
+4. Verify no duplicates: `SELECT patient_id, COUNT(*) FROM patients GROUP BY patient_id HAVING COUNT(*) > 1;` — should return 0 rows
+
+**Test 3 — Airflow DAG trigger:**
+1. Open Airflow UI at `http://3.6.92.19:8080`
+2. Navigate to `healthcare_analytics_pipeline`
+3. Click ▶ Trigger DAG
+4. Monitor task states — all should turn green
+5. Expected task durations: check_mysql (~2s), init_schema (~5s), wait_for_spark (~20s), financial/operational/patient (~3–5 min each)
+
+**Test 4 — Analytics tables populated:**
+```sql
+-- After DAG completes successfully:
+SHOW TABLES LIKE 'analytics_%';           -- Should list 15 tables
+SELECT COUNT(*) FROM analytics_revenue_by_doctor;  -- Should equal 10 (one row per doctor)
+SELECT * FROM analytics_monthly_revenue ORDER BY year, month;  -- Trend data
+SELECT * FROM analytics_outstanding_payments;       -- Pending + Failed bills
+```
+
+**Test 5 — FastAPI endpoints:**
+```bash
+# Test health
+curl http://3.6.92.19:8000/health
+# Expected: {"status":"ok"}
+
+# Test financial router
+curl http://3.6.92.19:8000/api/financial/revenue-by-doctor
+# Expected: JSON array with 10 doctor revenue objects
+
+# Test infrastructure health
+curl http://3.6.92.19:8000/api/infrastructure/health
+# Expected: JSON with 10 service status objects
+```
+
+## 9.4 System / End-to-End Tests
+
+**Full pipeline smoke test:**
+1. Start EC21 (`docker compose up -d`) — wait for producer to complete and Flink to process
+2. Start EC22 (`docker compose up -d`) — wait for Airflow init
+3. Configure Airflow spark_default connection
+4. Trigger analytics DAG — wait for completion
+5. Open dashboard at `http://3.6.92.19:3000`
+6. Navigate through all 7 pages — verify data appears on each
+
+**AI chat end-to-end test:**
+Send each of the following questions and verify tool invocation + response:
+
+| Question | Expected Tool | Expected Response Type |
+|---|---|---|
+| "How many patients are in the system?" | `get_mysql_row_counts` | Number with table breakdown |
+| "Which doctor earned the most revenue?" | `query_analytics_db` | Doctor name + amount |
+| "Is the streaming pipeline running?" | `get_flink_job_status` | RUNNING + uptime |
+| "What is the pipeline status?" | `get_pipeline_status` | DAG state + task list |
+| "Are all services healthy?" | `check_infrastructure_health` | N/10 online + details |
+| "How many Kafka messages have been processed?" | `get_kafka_topic_info` | Per-topic message counts |
+| "Show me the top 5 doctors by score" | `query_analytics_db` | Markdown table |
+
+**Data entry end-to-end test:**
+1. Open Data Entry page
+2. Submit a new patient form (fill required fields)
+3. Wait 10 seconds
+4. Open Kafka UI — verify new message in `patients` topic
+5. Query MySQL — verify new patient row exists
+
+## 9.5 Bugs Found & Fixed
+
+All 7 bugs listed below were encountered during the initial deployment of the AI chat feature on EC22.
+
+| # | Bug Description | Root Cause | Fix Applied | File(s) Affected |
+|---|---|---|---|---|
+| 1 | `pydantic.errors.PydanticUserError` on startup — version conflict | `langchain>=0.3.0` requires `pydantic>=2.7.4` but `pydantic==2.7.1` was pinned | Changed to `pydantic>=2.7.4,<3.0.0` | `requirements.txt` |
+| 2 | `ImportError: cannot import name 'create_tool_calling_agent'` | `langchain>=0.3.0` without upper bound installs `langchain 1.x` which removed this function | Pinned `langchain>=0.3.0,<1.0.0` | `requirements.txt` |
+| 3 | `chmod: changing permissions of 'serversfinal.pem': Operation not permitted` | SSH PEM file stored on NTFS mount (`/mnt/e/`) which does not support Unix permissions | Copy to `/dev/shm/serversfinal.pem` and `chmod 400` from there | Deployment procedure |
+| 4 | `TypeError: argument of type 'NoneType' is not iterable` on no-arg tool call | `langchain 0.3.30` `parse_ai_message_to_tool_action` passes `args=None` for tools that take no arguments | Changed `tool.invoke(tc["args"])` to `tool.invoke(tc["args"] or {})` | `langchain_agent.py` |
+| 5 | `groq.BadRequestError: service_tier=on_demand not supported` | LangChain-Groq default config sends `service_tier` parameter; Groq free tier does not support this field | Removed the parameter from the `ChatGroq()` constructor by not specifying it | `langchain_agent.py` |
+| 6 | LLaMA generates `<function=tool_name {...}> </function>` instead of OpenAI JSON format | Free tier + long tool descriptions causes LLaMA to fall back to its native function-calling format, which LangChain agent executor cannot parse | Replaced `create_tool_calling_agent` + AgentExecutor with manual `llm.bind_tools().ainvoke()` loop; shortened `query_analytics_db` tool description | `langchain_agent.py`, `tools.py` |
+| 7 | `groq.APIError: failed_generation` when using SSE endpoint | Adding `AsyncCallbackHandler` to `ainvoke()` triggers a different internal code path in LangChain-Groq that conflicts with the streaming+tool-use combination on the free tier | Removed all callback handlers from the `ainvoke()` call in the SSE endpoint | `langchain_agent.py`, `routers/chat.py` |
+
+---
+
+# 10. API Documentation
+
+## 10.1 Financial, Operational & Patients Routers
+
+All three routers read directly from analytics tables in EC21 MySQL. Responses are JSON arrays or objects.
+
+**Financial Router — `GET /api/financial/...`**
+
+| Method | Path | Description | Response |
+|---|---|---|---|
+| GET | `/revenue-by-doctor` | Revenue aggregated per doctor | `[{doctor_id, full_name, specialization, hospital_branch, total_bills, total_revenue, avg_bill_amount, max_bill_amount}]` |
+| GET | `/revenue-by-specialization` | Revenue per medical specialization | `[{specialization, doctor_count, total_appointments, total_revenue, avg_revenue_per_appt}]` |
+| GET | `/revenue-by-branch` | Revenue per hospital branch | `[{hospital_branch, doctor_count, total_appointments, total_revenue}]` |
+| GET | `/billing-payment` | Bill counts and amounts by payment method + status | `[{payment_method, payment_status, bill_count, total_amount, avg_amount, pct_of_total_revenue}]` |
+| GET | `/outstanding-payments` | Pending and failed payment summary | `[{payment_status, bill_count, total_outstanding, oldest_bill_date}]` |
+| GET | `/monthly-revenue` | Monthly revenue trend with MoM growth | `[{year, month, bill_count, total_revenue, avg_revenue, mom_growth_pct}]` |
+| GET | `/treatment-cost` | Cost statistics per treatment type | `[{treatment_type, treatment_count, avg_cost, min_cost, max_cost, total_cost}]` |
+
+**Operational Router — `GET /api/operational/...`**
+
+| Method | Path | Description | Response |
+|---|---|---|---|
+| GET | `/appointment-status` | Counts and percentages per appointment status | `[{status, appointment_count, percentage}]` |
+| GET | `/doctor-workload` | Per-doctor appointment and patient load | `[{doctor_id, full_name, total_appointments, unique_patients, avg_cost}]` |
+| GET | `/peak-hours` | Appointment volume by hour of day | `[{hour_of_day, appointment_count}]` |
+| GET | `/scorecard` | Composite doctor performance ranking | `[{doctor_id, full_name, specialization, total_revenue, total_appointments, completion_rate, overall_score}]` |
+
+**Patients Router — `GET /api/patients/...`**
+
+| Method | Path | Description | Response |
+|---|---|---|---|
+| GET | `/spending` | Total and average spend per patient | `[{patient_id, full_name, total_spend, avg_spend, max_spend, visit_count}]` |
+| GET | `/age-groups` | Patient distribution by age bracket | `[{age_group, patient_count, percentage}]` |
+| GET | `/retention` | Aggregate retention metrics | `{total_patients, returning_patients, retention_rate, avg_visits}` |
+| GET | `/new-trend` | New patient registrations per month | `[{year, month, new_registrations}]` |
+
+## 10.2 Pipeline, DataEntry & Infrastructure Routers
+
+**Pipeline Router — `/api/pipeline/...`**
+
+| Method | Path | Description | Request Body | Response |
+|---|---|---|---|---|
+| GET | `/status` | Latest Airflow DAG run state and task breakdown | — | `{dag_id, run_id, state, execution_date, start_date, end_date, tasks: [{task_id, state, duration}]}` |
+| POST | `/trigger` | Trigger a new DAG run | — | `{dag_run_id, state, message}` |
+
+Pipeline router proxies to Airflow REST API at `http://airflow-webserver:8080/api/v1/...` using HTTP Basic Auth.
+
+**DataEntry Router — `/api/data-entry/...`**
+
+| Method | Path | Description | Request Body |
+|---|---|---|---|
+| POST | `/patient` | Submit new patient to Kafka | `{patient_id, first_name, last_name, gender, date_of_birth, ...}` |
+| POST | `/doctor` | Submit new doctor to Kafka | `{doctor_id, first_name, last_name, specialization, ...}` |
+| POST | `/appointment` | Submit new appointment to Kafka | `{appointment_id, patient_id, doctor_id, appointment_date, appointment_time, ...}` |
+| POST | `/treatment` | Submit new treatment to Kafka | `{treatment_id, appointment_id, treatment_type, cost, treatment_date, ...}` |
+| POST | `/billing` | Submit new billing record to Kafka | `{bill_id, patient_id, treatment_id, bill_date, amount, payment_method, payment_status}` |
+
+All data entry endpoints produce to the corresponding Kafka topic on EC21 (`65.0.80.152:9092`).
+Response: `{"status": "published", "topic": "appointments", "key": "A0101"}`
+
+**Infrastructure Router — `/api/infrastructure/...`**
+
+| Method | Path | Description | Response |
+|---|---|---|---|
+| GET | `/health` | Run live health probes for all 10 services | `{services: {name: {status, response_ms?, error?}}, summary: {online, total}}` |
+
+## 10.3 Chat Router — SSE Protocol
+
+**`POST /api/chat/message`**
+
+Starts an AI agent session and streams the response via Server-Sent Events.
+
+**Request Body:**
+```json
+{
+  "message": "Which doctor earned the most revenue?",
+  "session_id": "session-1716400000000",
+  "history": [
+    {"role": "user", "content": "Hello"},
+    {"role": "assistant", "content": "Hi! How can I help?"}
+  ]
+}
+```
+
+**Response:** `Content-Type: text/event-stream`
+
+Each event is a `data: <json>\n\n` line. Event types:
+
+| Event Type | When Sent | Payload |
+|---|---|---|
+| `token` | Final AI response text is ready | `{"type": "token", "text": "Dr. Jane Smith leads with..."}` |
+| `tool_start` | A tool begins execution | `{"type": "tool_start", "tool": "query_analytics_db"}` |
+| `tool_end` | A tool finishes execution | `{"type": "tool_end"}` |
+| `done` | Response fully delivered | `{"type": "done"}` |
+| `error` | An exception occurred | `{"type": "error", "text": "error message here"}` |
+
+**Frontend consumption (React):**
+```javascript
+const reader = res.body.getReader()
+const decoder = new TextDecoder()
+let buffer = ''
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  buffer += decoder.decode(value, { stream: true })
+  const lines = buffer.split('\n')
+  buffer = lines.pop()
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue
+    const event = JSON.parse(line.slice(6))
+    // handle event.type: token, tool_start, tool_end, done, error
+  }
+}
+```
+
+**`POST /api/chat/insights`**
+
+Generates a comprehensive analytics report by running the AI agent with a fixed prompt. Response is synchronous (not SSE).
+
+**Response:**
+```json
+{
+  "insights": "## Financial Summary\n...\n## Operational Summary\n...\n## Patient Summary\n...",
+  "generated_at": "2026-05-23T10:30:00.000000"
+}
+```
+
+The insights prompt instructs the agent to query all three analytics domains and return a concise markdown report with financial, operational, and patient summaries.
+
+---
+
+# 11. Future Enhancements & Conclusion
+
+## 11.1 Future Enhancements
+
+The current platform demonstrates a complete, working data engineering stack. The following enhancements would move it toward a production-grade system:
+
+**Infrastructure & DevOps:**
+| Enhancement | Description | Priority |
+|---|---|---|
+| CI/CD Pipeline | GitHub Actions workflow to build Docker images and deploy to EC2 on push to main | High |
+| Multi-broker Kafka | Add a second Kafka broker for high availability and increased throughput | High |
+| TLS/SSL encryption | Enable HTTPS on FastAPI and WSS on React dashboard | High |
+| User Authentication | JWT-based auth on FastAPI with role-based access (admin vs viewer) | High |
+| S3 Flink checkpointing | Replace local checkpoints with S3 state backend for durability across EC2 restarts | Medium |
+| Monitoring & Alerting | Prometheus + Grafana for container metrics; PagerDuty or SNS for pipeline failures | Medium |
+
+**Data Engineering:**
+| Enhancement | Description | Priority |
+|---|---|---|
+| Schema Registry | Confluent Schema Registry to enforce Avro schemas on Kafka topics | Medium |
+| Data quality metrics | Track invalid record rate per topic in a `dq_metrics` table | Medium |
+| Flink exactly-once semantics | Enable two-phase commit with MySQL for exactly-once guarantees | Medium |
+| Data archival | Write raw Kafka data to S3 via Kafka Connect S3 Sink for long-term storage | Low |
+| Delta Lake / Iceberg | Replace MySQL analytics tables with a lakehouse format for versioned analytics | Low |
+
+**AI & Dashboard:**
+| Enhancement | Description | Priority |
+|---|---|---|
+| More AI tools | Add tools for patient lookup by name, appointment scheduling, billing dispute filing | High |
+| Conversation persistence | Store chat history in a database (Redis or PostgreSQL) across sessions | Medium |
+| Dashboard alerts | Notify when outstanding payments exceed a threshold or Flink job is not RUNNING | Medium |
+| Scheduled insights | Email or Slack daily analytics report generated by the AI insights endpoint | Medium |
+| Voice interface | Add speech-to-text input to the chat page for hands-free querying | Low |
+
+## 11.2 Conclusion
+
+The Healthcare Data Platform demonstrates a complete, production-realistic implementation of a modern data engineering stack applied to the healthcare domain. The platform successfully achieves all defined objectives:
+
+**Real-Time Streaming:** Apache Kafka ingests healthcare events across 5 topics at a 2-second interval. Apache Flink processes each event, applying business validation rules, routing invalid records to side-output logs, and upserting valid records to MySQL with exactly-idempotent semantics. The Flink job remains in RUNNING state continuously, checkpointing every 10 seconds for fault tolerance.
+
+**Batch Analytics:** Apache Airflow orchestrates a daily pipeline that verifies data readiness, ensures analytical schemas exist, and submits 3 PySpark jobs in parallel. These jobs read operational data from MySQL, compute 15 aggregated KPI tables covering financial, operational, and patient dimensions, and write the results back to the same database.
+
+**Interactive Dashboard:** A 7-page React dashboard backed by a FastAPI REST API provides real-time visibility into all aspects of the platform — from revenue by doctor to infrastructure health to pipeline status. The data entry page enables users to submit new records directly to the Kafka streaming pipeline from the browser.
+
+**AI-Powered Querying:** An AI chat interface powered by LLaMA 4 Scout (via Groq) and LangChain allows users to ask natural language questions about their data. The agent dynamically selects from 7 live tools — querying the database, checking the Flink job, inspecting Kafka topics, and more — to provide accurate, data-backed answers in real time via SSE streaming.
+
+**Cloud Deployment:** The entire platform runs on 2 AWS EC2 instances in the ap-south-1 region using Docker Compose. All services are containerized, all credentials are environment-variable-driven, and health checks ensure reliable startup ordering.
+
+This project demonstrates proficiency in every layer of the modern data stack: event streaming, stateful stream processing, batch orchestration, distributed compute, REST API development, frontend engineering, and AI integration.
+
+## 11.3 References & Appendix
+
+**Documentation References:**
+- Apache Kafka documentation: https://kafka.apache.org/documentation/
+- Apache Flink (PyFlink) documentation: https://nightlies.apache.org/flink/flink-docs-stable/
+- Apache Airflow documentation: https://airflow.apache.org/docs/
+- Apache Spark (PySpark) documentation: https://spark.apache.org/docs/latest/api/python/
+- FastAPI documentation: https://fastapi.tiangolo.com/
+- LangChain documentation: https://python.langchain.com/
+- Groq API documentation: https://console.groq.com/docs/
+- React documentation: https://react.dev/
+
+**Software Versions Used:**
+| Software | Version |
+|---|---|
+| Confluent Kafka | 7.4.0 |
+| Apache Flink | 1.18 |
+| MySQL | 8.0 |
+| Apache Airflow | 2.9.3 |
+| Apache Spark | 3.5.0 |
+| FastAPI | 0.111.0 |
+| LangChain | 0.3.x (< 1.0.0) |
+| langchain-groq | >= 0.2.0 |
+| pydantic | >= 2.7.4, < 3.0.0 |
+| pymysql | 1.1.0 |
+| httpx | 0.27.0 |
+| kafka-python | 2.0.2 |
+| React | 18.x |
+| Tailwind CSS | 3.x |
+| PostgreSQL | 15 |
+| Python | 3.11 |
+| Node.js | 18 |
+| Docker Compose | v2 |
+
+**EC22 `.env.example` (reference):**
+```
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=your_postgres_password
+POSTGRES_DB=airflow
+POSTGRES_HOST_PORT=5432
+AIRFLOW_UID=50000
+AIRFLOW_WEBSERVER_PORT=8080
+AIRFLOW_FERNET_KEY=your_fernet_key_here
+AIRFLOW__CORE__EXECUTOR=LocalExecutor
+_AIRFLOW_WWW_USER_USERNAME=admin
+_AIRFLOW_WWW_USER_PASSWORD=your_airflow_password
+SPARK_MASTER_WEBUI_PORT=9090
+SPARK_MASTER_PORT=7077
+SPARK_WORKER_WEBUI_PORT=8082
+SPARK_WORKER_CORES=2
+SPARK_WORKER_MEMORY=2g
+MYSQL_HOST=<EC21_PUBLIC_IP>
+MYSQL_PORT=3308
+MYSQL_DATABASE=healthcare
+MYSQL_USER=root
+MYSQL_PASSWORD=your_mysql_password
+KAFKA_BOOTSTRAP_SERVERS=<EC21_PUBLIC_IP>:9092
+DASHBOARD_API_PORT=8000
+DASHBOARD_UI_PORT=3000
+GROQ_API_KEY=gsk_...
+```
+
+**EC21 `.env.example` (reference):**
+```
+ZOOKEEPER_PORT=2181
+KAFKA_HOST_PORT=9092
+KAFKA_INTERNAL_PORT=29092
+KAFKA_BROKER_ID=1
+KAFKA_REPLICATION_FACTOR=1
+KAFKA_AUTO_CREATE_TOPICS=true
+KAFKA_UI_PORT=8085
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+MYSQL_ROOT_PASSWORD=your_mysql_root_password
+MYSQL_HOST_PORT=3308
+MYSQL_CONTAINER_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your_mysql_password
+MYSQL_DATABASE=healthcare
+FLINK_UI_PORT=8081
+MAX_EVENTS=100
+SEND_INTERVAL=2.0
+FLINK_CHECKPOINT_INTERVAL=10000
+FLINK_TASK_SLOTS=1
+FLINK_PARALLELISM=1
+MAX_RETRIES=5
+RETRY_DELAY=10
+POLL_INTERVAL=30
+JOB_SCRIPTS=healthcare_job.py
+```
+
+---
+
+*End of Document*
+
+**Healthcare Data Platform — Project Documentation v1.0**
+**Total: 50 pages | 11 Chapters | May 2026**
