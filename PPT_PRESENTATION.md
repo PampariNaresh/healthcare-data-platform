@@ -1,5 +1,5 @@
 # Healthcare Data Platform — PPT Presentation
-### 34 Slides | End-to-End Real-Time Streaming & Analytics on AWS
+### 35 Slides | End-to-End Real-Time Streaming & Analytics on AWS
 
 ---
 
@@ -38,16 +38,17 @@ Modern hospitals need to track patient flow, revenue, and doctor performance in 
 **Title:** What This Platform Achieves
 
 **Bullets:**
-1. Ingest 5 healthcare event types in real-time using Apache Kafka
-2. Validate and clean streaming data record-by-record with Apache Flink
-3. Persist operational data in MySQL with upsert semantics (idempotent writes)
+1. Ingest 10 healthcare event types in real-time using Apache Kafka (5 clinical + 5 monitoring)
+2. Validate and clean streaming data with 2 Apache Flink jobs (healthcare + monitoring)
+3. Persist operational data in 10 MySQL tables with upsert semantics (idempotent writes)
 4. Orchestrate daily batch analytics at 02:00 UTC using Apache Airflow
-5. Compute 15 KPI aggregate tables using Apache Spark (PySpark)
-6. Visualize all analytics on a 7-page React + FastAPI interactive dashboard
-7. Enable natural-language data querying via AI (LLaMA 4 Scout + LangChain + Groq)
+5. Compute 20 KPI aggregate tables using 4 Apache Spark jobs (PySpark)
+6. Visualize all analytics on an 8-page React + FastAPI interactive dashboard
+7. Monitor vitals, lab results, ICU codes, and hospital events on a dedicated Monitoring page
+8. Enable natural-language data querying via AI (LLaMA 4 Scout + LangChain + Groq, 8 tools)
 
 **Speaker Notes:**
-The platform covers the full data engineering stack — from raw event ingestion to AI-powered querying. Every layer is containerized with Docker and deployed on AWS EC2 for a production-realistic setup.
+The platform covers the full data engineering stack — from raw event ingestion to AI-powered querying. The monitoring layer adds real clinical-observation data (vitals, labs, ICU codes) on top of the core clinical workflow. Every layer is containerized with Docker and deployed on AWS EC2 for a production-realistic setup.
 
 ---
 
@@ -115,13 +116,13 @@ Scope decisions were made to keep the platform focused on demonstrating data eng
 │                                 │          │                                      │
 │  Faker Producer                 │          │  PostgreSQL (Airflow meta DB)         │
 │       ↓                         │          │  Airflow Webserver + Scheduler        │
-│  Kafka (5 topics)               │◄─────────│  Spark Master + Worker                │
+│  Kafka (10 topics)              │◄─────────│  Spark Master + Worker                │
 │       ↓                         │  JDBC    │       ↓ (reads + writes)             │
-│  PyFlink (validate)             │  :3308   │  FastAPI Dashboard API               │
-│       ↓                         │          │       ↓                              │
+│  PyFlink x2 (clinical +         │  :3308   │  FastAPI Dashboard API (8 routers)   │
+│   monitoring jobs)              │          │       ↓                              │
 │  MySQL :3308                    │  Kafka   │  React Dashboard UI                  │
-│  (5 operational tables +        │◄─────────│  (7 pages)                           │
-│   15 analytics tables)          │  :9092   │                                      │
+│  (10 operational tables +       │◄─────────│  (8 pages + AI Chat)                 │
+│   20 analytics tables)          │  :9092   │                                      │
 └─────────────────────────────────┘          └──────────────────────────────────────┘
 ```
 
@@ -149,6 +150,9 @@ zookeeper (:2181)
               └──► flink-jobmanager (:8081)
                         ├──► flink-taskmanager
                         └──► flink-job-submitter (restart:no)
+                                    ↓
+                              submits healthcare_job.py (5 clinical topics)
+                              submits monitoring_job.py (5 monitoring topics)
                                     ↓
                               mysql (:3308)
 ```
@@ -186,7 +190,7 @@ postgres (:5432) ──► airflow-init (restart:no)
 - Network: `ec22-net` (Docker bridge)
 - Volumes: `postgres-data`, `airflow-logs`
 - PostgreSQL stores only Airflow metadata (DAG state, task logs, connections)
-- Spark reads EC21 MySQL and writes 15 analytics tables back to it
+- Spark reads EC21 MySQL and writes 20 analytics tables back to it
 - Dashboard API reads both operational and analytics tables
 - Dashboard UI served by nginx on port 3000
 
@@ -205,12 +209,13 @@ User Browser
     ↓
 React (Vite/Tailwind) → nginx (:3000)
     ↓ HTTP / SSE
-FastAPI (:8000) — 7 Routers
+FastAPI (:8000) — 8 Routers
     ├── /api/financial      → EC21 MySQL (analytics_* tables)
     ├── /api/operational    → EC21 MySQL (analytics_* tables)
     ├── /api/patients       → EC21 MySQL (analytics_* tables)
+    ├── /api/monitoring     → EC21 MySQL (analytics_vitals/lab/icu/event/dept)
     ├── /api/pipeline       → Airflow REST API (:8080)
-    ├── /api/data-entry     → EC21 Kafka (:9092)
+    ├── /api/data-entry     → EC21 Kafka (:9092) — 10 entity types
     ├── /api/infrastructure → TCP/HTTP probes (10 services)
     └── /api/chat           → LangChain + Groq API (SSE)
 ```
@@ -288,21 +293,26 @@ FastAPI (:8000) — 7 Routers
 **Execution Flow:**
 ```
 1. Wait for Kafka (15 retries × 5s = 75s max)
-2. Create 5 topics if missing (patients, doctors, appointments, treatments, billing)
-3. Send 20 patients (P001–P020) at 50ms intervals → flush
-4. Wait 1 second
-5. Send 10 doctors (D001–D010) at 50ms intervals → flush
-6. Wait 1 second
-7. Loop: generate appointment + treatment + billing per event cycle
-8. Exit after MAX_EVENTS=100 (configurable)
+2. Create 10 topics if missing (5 clinical + 5 monitoring)
+3. Seed 5 departments (DEPT01–DEPT05) → flush
+4. Send 20 patients (P001–P020) at 50ms intervals → flush
+5. Wait 1 second
+6. Send 10 doctors (D001–D010) at 50ms intervals → flush
+7. Wait 1 second
+8. Loop: generate 7 events per tick (1 per monitoring + clinical topic)
+9. Exit after MAX_EVENTS=100 ticks (configurable)
 ```
 
 **Data ranges:**
 - Patients: 8 insurance providers, DOB 1950–2000, registration 2020–2023
-- Doctors: 8 specializations, 5 hospital branches, 1–35 years experience
+- Doctors: 12 specializations, 5 hospital branches, 1–35 years experience
 - Appointments: dates 2023–2024, 8 time slots, 4 visit reasons, 4 statuses
-- Treatments: 8 treatment types, cost ₹500–₹8,000
-- Billing: 3 payment methods, 3 payment statuses
+- Treatments: 12 treatment types, cost ₹500–₹8,000
+- Billing: 7 payment methods, 3 payment statuses
+- Patient Vitals: HR 60–100, SpO2 92–100%, BP 100–140/60–90, temp 36.0–37.5°C
+- Lab Reports: 10 test types with auto-populated unit + normal_range, flag: normal/low/high/critical
+- Hospital Events: 7 event types (Admission, Discharge, Surgery, Emergency, Transfer, Procedure, Observation)
+- ICU Codes: Code Blue/Red/Pink/Gray/White, severity CRITICAL or HIGH
 
 **Send interval:** 2 seconds between events (configurable via `SEND_INTERVAL`)
 
@@ -310,15 +320,25 @@ FastAPI (:8000) — 7 Routers
 
 ## SLIDE 13 — Kafka Topics & Schema
 
-**Title:** Kafka — 5 Topics & Message Schema
+**Title:** Kafka — 10 Topics & Message Schema
 
+**Clinical Topics (5):**
 | Topic | Key | Partitions | Replication |
 |---|---|---|---|
 | patients | patient_id (P001–P020) | 1 | 1 |
 | doctors | doctor_id (D001–D010) | 1 | 1 |
+| departments | department_id (DEPT01–DEPT05) | 1 | 1 |
 | appointments | appointment_id (A0001+) | 1 | 1 |
 | treatments | treatment_id (T0001+) | 1 | 1 |
 | billing | bill_id (B0001+) | 1 | 1 |
+
+**Monitoring Topics (5):**
+| Topic | Key | Partitions | Replication |
+|---|---|---|---|
+| patient_vitals | UUID | 1 | 1 |
+| lab_reports | UUID | 1 | 1 |
+| hospital_events | UUID | 1 | 1 |
+| icu_codes | UUID | 1 | 1 |
 
 **Message format:** JSON, UTF-8 encoded, key serialized as string
 
@@ -360,24 +380,31 @@ Convert dict → typed Flink Row
 Main output stream → JdbcSink → MySQL
 ```
 
-**Validation rules per entity:**
-| Entity | Key Validation Rules |
-|---|---|
-| Patient | gender ∈ {M,F}, valid DOB + registration date (YYYY-MM-DD), email regex |
-| Doctor | years_experience: 0–60 integer |
-| Appointment | valid date + time (HH:MM:SS), status ∈ {Scheduled, Completed, Cancelled, No-show} |
-| Treatment | cost > 0, valid treatment_date |
-| Billing | amount > 0, payment_method ∈ {Cash, Insurance, Card}, payment_status ∈ {Paid, Pending, Failed} |
+**Two Flink jobs:** `healthcare_job.py` (5 clinical topics) + `monitoring_job.py` (5 monitoring topics)
 
-**Checkpointing:** every 10 seconds | **Parallelism:** 1 | **Offsets:** earliest (reads all history on start)
+**Validation rules per entity:**
+| Entity | Job | Key Validation Rules |
+|---|---|---|
+| Patient | healthcare | gender ∈ {M,F}, valid DOB + registration date (YYYY-MM-DD), email regex |
+| Doctor | healthcare | years_experience: 0–60 integer |
+| Appointment | healthcare | valid date + time (HH:MM:SS), status ∈ {Scheduled, Completed, Cancelled, No-show} |
+| Treatment | healthcare | cost > 0, valid treatment_date |
+| Billing | healthcare | amount > 0, payment_method ∈ 7 values, payment_status ∈ {Paid, Pending, Failed} |
+| Department | monitoring | department_id ≥ 2 chars, required fields |
+| PatientVitals | monitoring | HR 30–250, SpO2 50–100, systolic 50–250, diastolic 30–150, temp 33–45, rr 5–60 |
+| LabReport | monitoring | flag ∈ {normal, low, high, critical} |
+| HospitalEvent | monitoring | event_type ∈ 7-value enum |
+| IcuCode | monitoring | severity ∈ {CRITICAL, HIGH} |
+
+**Checkpointing:** every 10 seconds (both jobs) | **Parallelism:** 1 | **Offsets:** earliest
 
 ---
 
 ## SLIDE 15 — MySQL Operational Schema — ERD
 
-**Title:** MySQL — Operational Data Model (5 Tables)
+**Title:** MySQL — Operational Data Model (10 Tables)
 
-**ERD:**
+**Clinical Tables (5):**
 ```
 patients (patient_id PK)
     │
@@ -389,7 +416,7 @@ appointments (appointment_id PK)           │
     │ doctor_id  FK → doctors              │
     │                                      │
     ▼                                      │
-treatments (treatment_id PK)              │
+treatments (treatment_id PK)               │
     │ appointment_id FK → appointments     │
     │                                      │
     ▼                                      ▼
@@ -399,6 +426,21 @@ billing (bill_id PK)
 
 doctors (doctor_id PK)
     └── referenced by appointments
+```
+
+**Monitoring Tables (5):**
+```
+departments (department_id PK)
+    │ head_doctor_id FK → doctors (SET NULL)
+    │
+    ├──► hospital_events (department_id FK)
+    └──► icu_codes       (department_id FK)
+
+patients (patient_id PK)
+    ├──► patient_vitals  (patient_id FK, CASCADE)
+    ├──► lab_reports     (patient_id FK, CASCADE)
+    ├──► hospital_events (patient_id FK, CASCADE)
+    └──► icu_codes       (patient_id FK, CASCADE)
 ```
 
 **Key constraints:**
@@ -427,7 +469,7 @@ JdbcConnectionOptions:
   - foreign_key_checks=0      # allow out-of-order upserts
 ```
 
-**Upsert SQL pattern (all 5 tables):**
+**Upsert SQL pattern (all 10 tables):**
 ```sql
 INSERT INTO appointments (appointment_id, patient_id, ...)
 VALUES (?, ?, ...)
@@ -455,7 +497,8 @@ start
                           └──► wait_for_spark_cluster
                                       ├──► financial_analytics    (7 tables)
                                       ├──► operational_analytics  (4 tables)
-                                      └──► patient_analytics      (4 tables)
+                                      ├──► patient_analytics      (4 tables)
+                                      └──► monitoring_analytics   (5 tables)
                                                     └──► pipeline_complete
 ```
 
@@ -477,11 +520,12 @@ start
 |---|---|---|
 | start | EmptyOperator | DAG entry point |
 | check_mysql_connection | PythonOperator | Connects via pymysql, counts patients table rows |
-| init_analytical_schema | PythonOperator | Runs `CREATE TABLE IF NOT EXISTS` for all 15 analytics tables (idempotent) |
+| init_analytical_schema | PythonOperator | Runs `CREATE TABLE IF NOT EXISTS` for all 20 analytics tables (idempotent) |
 | wait_for_spark_cluster | SparkClusterSensor | Polls Spark REST API every 15s, timeout 300s, requires ≥1 worker |
 | financial_analytics | SparkSubmitOperator | Submits `financial_analytics.py`, `conn_id=spark_default` |
 | operational_analytics | SparkSubmitOperator | Submits `operational_analytics.py` |
 | patient_analytics | SparkSubmitOperator | Submits `patient_analytics.py` |
+| monitoring_analytics | SparkSubmitOperator | Submits `monitoring_analytics.py` |
 | pipeline_complete | EmptyOperator | Success marker |
 
 **Spark job config:**
@@ -531,11 +575,31 @@ start
 | analytics_patient_retention | first_visit, last_visit, visit_count, is_returning flag, retention_rate |
 | analytics_new_patient_trend | new_registrations per month (from registration_date) |
 
-**Total: 15 analytics tables across 3 Spark jobs run in parallel by Airflow**
+**Total: 15 analytics tables (financial + operational + patient) — see next slide for monitoring analytics**
 
 ---
 
-## SLIDE 21 — Analytical Schema: Design Rationale
+## SLIDE 21 — Spark: Monitoring Analytics (5 Tables)
+
+**Title:** PySpark — Monitoring Analytics Job
+
+| Analytics Table | Dimensions | Key Metrics |
+|---|---|---|
+| analytics_vitals_patient_summary | Per patient | reading_count, avg_heart_rate, avg_spo2, avg_systolic_bp, avg_diastolic_bp, avg_temperature, anomaly_count, anomaly_rate_pct |
+| analytics_lab_test_summary | Per test name | total_tests, normal_count, low_count, high_count, critical_count, avg_value |
+| analytics_hospital_event_summary | Per event type | event_count, total_amount, avg_amount, unique_patients |
+| analytics_icu_code_summary | code_type × severity | code_count, unique_patients, most_common_outcome |
+| analytics_department_activity | Per department | total_events, total_icu_codes, critical_icu_count, total_amount |
+
+**Source tables read:** `patient_vitals`, `lab_reports`, `hospital_events`, `icu_codes`, `departments`
+
+**Dashboard page:** Monitoring page — shows anomaly rates, lab flag distribution, ICU activation breakdown, department activity table
+
+**Total across all 4 jobs: 20 analytics tables run in parallel by Airflow**
+
+---
+
+## SLIDE 22 — Analytical Schema: Design Rationale
 
 **Title:** Why Pre-Aggregate? Design Decisions Explained
 
@@ -552,7 +616,7 @@ start
 **Why write back to EC21 MySQL?**
 - Dashboard needs only ONE MySQL connection string
 - No separate analytics database to provision or sync
-- 15 analytics tables coexist with 5 operational tables in the `healthcare` DB
+- 20 analytics tables coexist with 10 operational tables in the `healthcare` DB
 - Analytical tables are TRUNCATED on each run — always fresh, never stale
 
 **Idempotency:**
@@ -562,7 +626,7 @@ start
 
 ---
 
-## SLIDE 22 — Spark Job Architecture
+## SLIDE 23 — Spark Job Architecture
 
 **Title:** Spark Job Design — utils.py Shared Layer
 
@@ -595,17 +659,18 @@ def write_table(df, table_name):
 
 ---
 
-## SLIDE 23 — FastAPI: Router Map
+## SLIDE 24 — FastAPI: Router Map
 
-**Title:** FastAPI Backend — 7 Routers & API Design
+**Title:** FastAPI Backend — 8 Routers & API Design
 
 | Router | Prefix | Key Endpoints | Data Source |
 |---|---|---|---|
 | financial | `/api/financial` | `/revenue-by-doctor`, `/monthly-revenue`, `/outstanding`, `/billing-payment` | EC21 MySQL analytics_* |
 | operational | `/api/operational` | `/appointment-status`, `/peak-hours`, `/doctor-workload`, `/scorecard` | EC21 MySQL analytics_* |
 | patients | `/api/patients` | `/spending`, `/age-groups`, `/retention`, `/new-trend` | EC21 MySQL analytics_* |
+| monitoring | `/api/monitoring` | `/vitals-summary`, `/lab-test-summary`, `/hospital-event-summary`, `/icu-code-summary`, `/department-activity` | EC21 MySQL analytics_* |
 | pipeline | `/api/pipeline` | `/status` (GET), `/trigger` (POST) | Airflow REST API :8080 |
-| data_entry | `/api/data-entry` | `/patient`, `/doctor`, `/appointment`, `/treatment`, `/billing` | EC21 Kafka :9092 |
+| data_entry | `/api/data-entry` | 10 endpoints — patient, doctor, dept, appointment, treatment, billing, vitals, lab, event, icu | EC21 Kafka :9092 |
 | infrastructure | `/api/infrastructure` | `/health` | TCP/HTTP probes (10 services) |
 | chat | `/api/chat` | `/message` (SSE), `/insights` (sync) | LangChain + Groq API |
 
@@ -617,9 +682,9 @@ def write_table(df, table_name):
 
 ---
 
-## SLIDE 24 — React Dashboard: All 7 Pages
+## SLIDE 25 — React Dashboard: All 8 Pages
 
-**Title:** React Dashboard — 7 Interactive Pages
+**Title:** React Dashboard — 8 Interactive Pages
 
 **Financial Page:**
 - KPI cards: Total Revenue, Outstanding Payments, Avg Bill Amount, Top Earning Doctor
@@ -637,19 +702,27 @@ def write_table(df, table_name):
 - Pie chart: Patient Age Groups
 - KPI cards: Total Patients, Retention Rate, Avg Spend
 - Bar chart: New Patient Registrations by Month
-- Table: Top Spenders
+- Table: Top Spenders by Insurance Provider
+
+**Monitoring Page:**
+- KPI cards: Total Anomalies, Avg Anomaly Rate, Critical Lab Tests, ICU Activations
+- Bar chart: Patient Anomaly Rates (Top 10)
+- Stacked bar: Lab Flag Distribution (normal/low/high/critical per test)
+- Pie chart: ICU Code Distribution by type
+- Bar chart: Hospital Events Breakdown by type
+- Table: Department Activity (events, ICU codes, critical count, revenue)
 
 **Pipeline Page:** DAG status card, task list with state + duration badges, Trigger button
 
 **Infrastructure Page:** 10 service health cards — ✅ online / ❌ offline with response time (ms)
 
-**Data Entry Page:** Forms for each entity type → submits to Kafka on save
+**Data Entry Page:** 10 forms in 2 groups (Clinical + Monitoring) → submits to Kafka on save
 
 **Chat Page:** AI assistant with suggestions, tool chips, markdown responses, session history
 
 ---
 
-## SLIDE 25 — Data Entry & Real-Time Write
+## SLIDE 26 — Data Entry & Real-Time Write
 
 **Title:** Data Entry — From Dashboard Form to Kafka to MySQL
 
@@ -681,7 +754,7 @@ def write_table(df, table_name):
 
 ---
 
-## SLIDE 26 — Infrastructure Monitoring
+## SLIDE 27 — Infrastructure Monitoring
 
 **Title:** Live Infrastructure Health — 10 Service Probes
 
@@ -707,7 +780,7 @@ def write_table(df, table_name):
 
 ---
 
-## SLIDE 27 — AI Agent Architecture
+## SLIDE 28 — AI Agent Architecture
 
 **Title:** AI Chat — LangChain + Groq + Manual Tool-Calling Loop
 
@@ -749,7 +822,7 @@ Groq API → LLaMA 4 Scout 17B
 
 ---
 
-## SLIDE 28 — 7 Tools: Capability Map
+## SLIDE 29 — 7 Tools: Capability Map
 
 **Title:** AI Agent Tools — 7 Live System Integrations
 
@@ -771,7 +844,7 @@ Groq API → LLaMA 4 Scout 17B
 
 ---
 
-## SLIDE 29 — Manual Tool-Calling Loop: Why & How
+## SLIDE 30 — Manual Tool-Calling Loop: Why & How
 
 **Title:** Why We Use a Manual Loop Instead of LangChain Agent
 
@@ -806,7 +879,7 @@ for _ in range(8):  # max iterations
 
 ---
 
-## SLIDE 30 — AI Chat Demo
+## SLIDE 31 — AI Chat Demo
 
 **Title:** AI Chat — Live Demo Walkthrough
 
@@ -849,25 +922,25 @@ AI:   "9/10 services online. EC21 Zookeeper is offline.
 
 ---
 
-## SLIDE 31 — Functional Requirements
+## SLIDE 32 — Functional Requirements
 
 **Title:** Functional Requirements
 
 | ID | Requirement | Category |
 |---|---|---|
-| FR-01 | System shall ingest events for 5 entity types via Kafka | Ingestion |
-| FR-02 | Producer shall auto-create topics if not existing | Ingestion |
-| FR-03 | Producer shall send 20 patients and 10 doctors before event loop | Ingestion |
-| FR-04 | System shall validate all 5 entity types per defined business rules | Streaming |
+| FR-01 | System shall ingest events for 10 event types via Kafka (5 clinical + 5 monitoring) | Ingestion |
+| FR-02 | Producer shall auto-create all 10 topics if not existing | Ingestion |
+| FR-03 | Producer shall send 20 patients and 10 doctors before clinical event loop | Ingestion |
+| FR-04 | System shall validate all 10 entity types per defined business rules | Streaming |
 | FR-05 | Invalid records shall be routed to side-output logs (not dropped silently) | Streaming |
 | FR-06 | Valid records shall be upserted to MySQL using ON DUPLICATE KEY UPDATE | Streaming |
-| FR-07 | Flink shall checkpoint state every 10 seconds | Streaming |
+| FR-07 | Both Flink jobs shall checkpoint state every 10 seconds | Streaming |
 | FR-08 | Airflow DAG shall execute daily at 02:00 UTC | Batch |
 | FR-09 | DAG shall verify MySQL connectivity and data presence before proceeding | Batch |
-| FR-10 | DAG shall idempotently create 15 analytical tables on every run | Batch |
-| FR-11 | Financial, Operational, and Patient Spark jobs shall run in parallel | Batch |
-| FR-12 | Dashboard shall expose 7 REST API routers with CORS enabled | Dashboard |
-| FR-13 | Users shall view 6 analytics pages covering financial, operational, patient, pipeline, infrastructure, and data entry | Dashboard |
+| FR-10 | DAG shall idempotently create 20 analytical tables on every run | Batch |
+| FR-11 | All 4 Spark jobs (Financial, Operational, Patient, Monitoring) shall run in parallel | Batch |
+| FR-12 | Dashboard shall expose 8 REST API routers with CORS enabled | Dashboard |
+| FR-13 | Users shall view 8 analytics pages: financial, operational, patient, monitoring, pipeline, infrastructure, data entry, and AI chat | Dashboard |
 | FR-14 | Users shall submit new healthcare records from the dashboard to Kafka | Dashboard |
 | FR-15 | AI chat shall answer natural language questions using 7 live tools | AI |
 | FR-16 | AI chat responses shall stream to the browser via Server-Sent Events | AI |
@@ -875,7 +948,7 @@ AI:   "9/10 services online. EC21 Zookeeper is offline.
 
 ---
 
-## SLIDE 32 — Non-Functional Requirements
+## SLIDE 33 — Non-Functional Requirements
 
 **Title:** Non-Functional Requirements
 
@@ -883,7 +956,7 @@ AI:   "9/10 services online. EC21 Zookeeper is offline.
 |---|---|---|
 | Performance | NFR-01 | Kafka message lag < 500ms under normal producer load |
 | Performance | NFR-02 | Flink-to-MySQL upsert latency < 2 seconds per batch |
-| Performance | NFR-03 | All 3 Spark analytics jobs complete within 10 minutes |
+| Performance | NFR-03 | All 4 Spark analytics jobs complete within 10 minutes |
 | Performance | NFR-04 | Dashboard API response time < 500ms for analytics reads |
 | Performance | NFR-05 | Infrastructure health check completes within 5 seconds |
 | Reliability | NFR-06 | Core services auto-restart on failure (restart: unless-stopped) |
@@ -900,7 +973,7 @@ AI:   "9/10 services online. EC21 Zookeeper is offline.
 
 ---
 
-## SLIDE 33 — Testing Strategy & Results
+## SLIDE 34 — Testing Strategy & Results
 
 **Title:** Testing Approach & Results
 
@@ -925,7 +998,7 @@ AI:   "9/10 services online. EC21 Zookeeper is offline.
 
 ---
 
-## SLIDE 34 — Deployment Steps & Bugs Fixed
+## SLIDE 35 — Deployment Steps & Bugs Fixed
 
 **Title:** Deployment Guide & Challenges Solved
 
@@ -976,4 +1049,4 @@ Each bug was traced to the intersection of LangChain version pinning, Groq free-
 - Slides 30: Use actual AI chat screenshots
 - All table slides: dark background tables with subtle borders
 
-**Total: 34 slides**
+**Total: 35 slides**
